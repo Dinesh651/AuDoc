@@ -3,6 +3,8 @@ import { initializeApp } from "firebase/app";
 import { getDatabase } from "firebase/database";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
+// IMPORTANT: Replace the following config with your own Firebase project configuration
+// found in Project Settings > General > Your apps > SDK setup and configuration.
 const firebaseConfig = {
   apiKey: "AIzaSyAorD9R4FiSq6M1MeJwFukkO3Leu7q6F7o",
   authDomain: "cozey-8ad64.firebaseapp.com",
