@@ -4,13 +4,21 @@ import { ref, set, update, onValue, push, child, query, orderByChild, equalTo, g
 import { Client } from '../types';
 
 export const createEngagement = async (client: Client, userId: string): Promise<string> => {
-  const newEngagementKey = push(child(ref(db), 'engagements')).key;
+  const engagementsRef = ref(db, 'engagements');
+  const newEngagementRef = push(engagementsRef);
+  const newEngagementKey = newEngagementRef.key;
+
   if (!newEngagementKey) throw new Error("Failed to generate engagement key");
   
-  await set(ref(db, `engagements/${newEngagementKey}/client`), client);
-  await set(ref(db, `engagements/${newEngagementKey}/userId`), userId);
-  await set(ref(db, `engagements/${newEngagementKey}/status`), 'In Progress');
-  await set(ref(db, `engagements/${newEngagementKey}/createdAt`), new Date().toISOString());
+  const engagementData = {
+    client,
+    userId,
+    status: 'In Progress',
+    createdAt: new Date().toISOString()
+  };
+  
+  // Perform a single atomic write to ensure data consistency
+  await set(newEngagementRef, engagementData);
   
   return newEngagementKey;
 };
