@@ -66,9 +66,13 @@ const App: React.FC = () => {
       setEngagementId(id);
       setClient(onboardedClient);
       setView('audit');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating engagement:", error);
-      alert("Failed to create audit engagement. Please check your connection.");
+      // Provide more detailed error for debugging
+      const errorMessage = error.code === 'PERMISSION_DENIED' 
+        ? "Permission denied. Please check Firebase Database Rules." 
+        : error.message || "Check your connection.";
+      alert(`Failed to create audit engagement: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
