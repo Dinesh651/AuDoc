@@ -7,7 +7,7 @@ import ClientOnboardingForm from './components/ClientOnboardingForm';
 import AuditDashboard from './components/AuditDashboard';
 import LandingPage from './components/LandingPage';
 import UserDashboard from './components/UserDashboard';
-import { createEngagement, getUserEngagements } from './services/db';
+import { createEngagement, getUserEngagements, saveUserProfile } from './services/db';
 
 const App: React.FC = () => {
   // Auth State
@@ -23,9 +23,13 @@ const App: React.FC = () => {
 
   // Handle Auth Change
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
+        // 1. Save/Update User in DB (The User Tree Root)
+        await saveUserProfile(currentUser);
+        
+        // 2. Fetch their specific engagements
         fetchEngagements(currentUser.uid);
         setView('dashboard');
       } else {
@@ -95,6 +99,12 @@ const App: React.FC = () => {
     setView('audit');
   };
 
+  const handleBackToDashboard = () => {
+    setView('dashboard');
+    // Refresh list to ensure status updates (if any) are reflected
+    if (user) fetchEngagements(user.uid);
+  };
+
   if (authLoading) {
      return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -122,12 +132,15 @@ const App: React.FC = () => {
             )}
 
             {view === 'new_engagement' && (
-                <div className="min-h-screen flex flex-col items-center justify-center p-4">
+                <div className="min-h-screen flex flex-col items-center justify-center p-4 relative">
                     <button 
                         onClick={() => setView('dashboard')} 
-                        className="absolute top-6 left-6 text-slate-500 hover:text-slate-800 flex items-center gap-2"
+                        className="absolute top-6 left-6 text-slate-500 hover:text-slate-800 flex items-center gap-2 font-medium transition-colors"
                     >
-                        &larr; Back to Dashboard
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                        Back to Dashboard
                     </button>
                     {loading ? (
                         <div className="text-center">
@@ -144,7 +157,7 @@ const App: React.FC = () => {
                 <AuditDashboard 
                     client={client} 
                     engagementId={engagementId} 
-                    onBack={() => setView('dashboard')}
+                    onBack={handleBackToDashboard}
                 />
             )}
           </>
