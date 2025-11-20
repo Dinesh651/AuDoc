@@ -37,16 +37,27 @@ const App: React.FC = () => {
   }, []);
 
   const fetchEngagements = async (userId: string) => {
-    const list = await getUserEngagements(userId);
-    setEngagementsList(list);
+    try {
+      const list = await getUserEngagements(userId);
+      setEngagementsList(list);
+    } catch (error) {
+      console.error("Error fetching engagements:", error);
+    }
   };
 
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed", error);
-      alert("Login failed. Please try again.");
+      if (error.code === 'auth/unauthorized-domain') {
+        const hostname = window.location.hostname;
+        alert(`Domain Authentication Error:\n\nThe domain "${hostname}" is not authorized for Google Sign-In.\n\n1. Go to the Firebase Console (https://console.firebase.google.com)\n2. Select your project\n3. Go to Authentication > Settings > Authorized Domains\n4. Add "${hostname}" to the list.`);
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        // User just closed the popup, ignore
+      } else {
+        alert(`Login failed: ${error.message}`);
+      }
     }
   };
 
