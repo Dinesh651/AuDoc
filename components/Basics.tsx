@@ -1,7 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { AuditTabProps, PermissionLevel } from '../types';
-import { updateSectionData, subscribeToSection, addTeamMemberByEmail, removeTeamMember } from '../services/db';
+import { AuditTabProps } from '../types';
+import { updateSectionData, subscribeToSection } from '../services/db';
+import { ref, push, child, update, remove } from 'firebase/database';
+import { db } from '../firebase';
 
 const DraftModal: React.FC<{
   isOpen: boolean;
@@ -101,7 +103,7 @@ const DateInput: React.FC<{
 };
 
 
-const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [], setTeamMembers, isReadOnly }) => {
+const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [], setTeamMembers }) => {
   const [data, setData] = useState({
     agmDate: '',
     appointmentDate: '',
@@ -134,8 +136,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'basics', (fetchedData) => {
       if (fetchedData) {
-        // Exclude teamMembers from here as it's handled by parent wrapper mainly for display, 
-        // but we'll use DB listener to keep things in sync.
         const { teamMembers: _, ...rest } = fetchedData; 
         setData(prev => ({ ...prev, ...rest }));
       }
@@ -146,7 +146,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
 
   // Helper to update and save
   const updateData = (updates: Partial<typeof data>) => {
-    if (isReadOnly) return;
     const newData = { ...data, ...updates };
     setData(newData);
     if (isLoaded) {
@@ -156,7 +155,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
 
   // Specific update for nested objects
   const updateNested = (section: 'acceptanceChecks' | 'sa210Checks' | 'ethicsChecks', key: string) => {
-    if (isReadOnly) return;
     const newSection = {
         ...data[section],
         [key]: !data[section][key as keyof typeof data[typeof section]]
@@ -166,55 +164,38 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
 
 
   // Team Member Local State
-  const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRole, setNewMemberRole] = useState('');
-  const [newMemberPermission, setNewMemberPermission] = useState<PermissionLevel>('viewer');
-  const [isAddingMember, setIsAddingMember] = useState(false);
+
+  const handleAddTeamMember = async () => {
+    if (!newMemberName.trim() || !newMemberRole.trim()) {
+        alert("Please fill in both Name and Role.");
+        return;
+    }
+
+    const newMemberId = push(child(ref(db), `engagements/${engagementId}/basics/teamMembers`)).key;
+    if (newMemberId) {
+        const updates: any = {};
+        updates[`engagements/${engagementId}/basics/teamMembers/${newMemberId}`] = {
+            id: newMemberId,
+            name: newMemberName,
+            role: newMemberRole
+        };
+        await update(ref(db), updates);
+        setNewMemberName('');
+        setNewMemberRole('');
+    }
+  };
+
+  const handleRemoveTeamMember = async (id: string) => {
+     if (window.confirm("Remove this team member?")) {
+         await remove(ref(db, `engagements/${engagementId}/basics/teamMembers/${id}`));
+     }
+  };
 
   // Draft Modal
   const [draftModalOpen, setDraftModalOpen] = useState(false);
   const [draftContent, setDraftContent] = useState('');
-
-  const handleAddTeamMember = async () => {
-    if (isReadOnly) return;
-    if (!newMemberEmail.trim() || !newMemberName.trim() || !newMemberRole.trim()) {
-        alert("Please fill in all fields (Email, Name, Role).");
-        return;
-    }
-
-    setIsAddingMember(true);
-    try {
-        await addTeamMemberByEmail(
-            engagementId,
-            client,
-            newMemberEmail,
-            newMemberName,
-            newMemberRole,
-            newMemberPermission
-        );
-        // Reset inputs
-        setNewMemberEmail('');
-        setNewMemberName('');
-        setNewMemberRole('');
-        setNewMemberPermission('viewer');
-    } catch (error: any) {
-        alert(error.message);
-    } finally {
-        setIsAddingMember(false);
-    }
-  };
-
-  const handleRemoveTeamMember = async (id: string, email: string) => {
-      if (isReadOnly) return;
-      if (window.confirm("Are you sure you want to remove this team member? This will remove the engagement from their dashboard.")) {
-          try {
-              await removeTeamMember(engagementId, id, email);
-          } catch (error) {
-              console.error("Error removing member:", error);
-          }
-      }
-  };
 
   const handleOpenDraft = () => {
     const formattedDate = new Date(client.fyPeriodEnd + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -225,7 +206,7 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
     setDraftModalOpen(true);
   };
 
-  const inputClass = `w-full p-2.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 ${isReadOnly ? 'bg-slate-100' : 'bg-slate-50'}`;
+  const inputClass = "w-full p-2.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 bg-slate-50";
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -239,7 +220,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
             <DateInput
               value={data.agmDate}
               onChange={(e) => updateData({ agmDate: e.target.value })}
-              disabled={isReadOnly}
             />
           </div>
           <div>
@@ -247,7 +227,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
             <DateInput
               value={data.appointmentDate}
               onChange={(e) => updateData({ appointmentDate: e.target.value })}
-              disabled={isReadOnly}
             />
           </div>
           <div>
@@ -258,7 +237,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
               onChange={(e) => updateData({ previousAuditor: e.target.value })}
               placeholder="Name of previous firm"
               className={inputClass}
-              disabled={isReadOnly}
             />
           </div>
         </div>
@@ -280,7 +258,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
                 checked={data.acceptanceChecks[item.key as keyof typeof data.acceptanceChecks]}
                 onChange={() => updateNested('acceptanceChecks', item.key)}
                 className="h-5 w-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
-                disabled={isReadOnly}
               />
               <label className="ml-3 text-slate-700 text-sm">{item.label}</label>
             </div>
@@ -314,7 +291,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
                 checked={data.sa210Checks[item.key as keyof typeof data.sa210Checks]}
                 onChange={() => updateNested('sa210Checks', item.key)}
                 className="h-5 w-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
-                disabled={isReadOnly}
               />
               <label className="ml-3 text-slate-700 text-sm">{item.label}</label>
             </div>
@@ -334,7 +310,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
               onChange={(e) => updateData({ partnerName: e.target.value })}
               placeholder="e.g., CA. John Doe"
               className={inputClass}
-              disabled={isReadOnly}
             />
           </div>
           <div>
@@ -345,7 +320,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
               onChange={(e) => updateData({ partnerMembership: e.target.value })}
               placeholder="e.g., 1234"
               className={inputClass}
-              disabled={isReadOnly}
             />
           </div>
         </div>
@@ -354,66 +328,41 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
       {/* Section 5: Audit Team Structure */}
       <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-teal-500">
         <h3 className="text-xl font-bold text-slate-800 mb-2">5. Audit Team Structure</h3>
-        <p className="text-sm text-slate-500 mb-4">Add team members by their registered Gmail address to give them access to this engagement.</p>
+        <p className="text-sm text-slate-500 mb-4">Document the engagement team members and their roles.</p>
         
-        {!isReadOnly && (
-            <div className="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
-                <h4 className="text-sm font-bold text-slate-700 mb-3">Add Team Member</h4>
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                    <div className="md:col-span-4">
-                        <label className="block text-xs font-medium text-slate-500 mb-1">Gmail Address</label>
-                        <input
-                            type="email"
-                            value={newMemberEmail}
-                            onChange={(e) => setNewMemberEmail(e.target.value)}
-                            placeholder="user@gmail.com"
-                            className="w-full p-2 border border-slate-300 rounded text-sm focus:ring-indigo-500"
-                        />
-                    </div>
-                    <div className="md:col-span-3">
-                        <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
-                        <input
-                            type="text"
-                            value={newMemberName}
-                            onChange={(e) => setNewMemberName(e.target.value)}
-                            placeholder="John Doe"
-                            className="w-full p-2 border border-slate-300 rounded text-sm focus:ring-indigo-500"
-                        />
-                    </div>
-                    <div className="md:col-span-3">
-                        <label className="block text-xs font-medium text-slate-500 mb-1">Role</label>
-                        <input
-                            type="text"
-                            value={newMemberRole}
-                            onChange={(e) => setNewMemberRole(e.target.value)}
-                            placeholder="Manager / Assistant"
-                            className="w-full p-2 border border-slate-300 rounded text-sm focus:ring-indigo-500"
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                         <label className="block text-xs font-medium text-slate-500 mb-1">Permission</label>
-                         <select 
-                            value={newMemberPermission}
-                            onChange={(e) => setNewMemberPermission(e.target.value as PermissionLevel)}
-                            className="w-full p-2 border border-slate-300 rounded text-sm focus:ring-indigo-500 bg-white"
-                         >
-                             <option value="viewer">Viewer</option>
-                             <option value="editor">Editor</option>
-                         </select>
-                    </div>
-                    <div className="md:col-span-12 mt-2">
-                        <button
-                            onClick={handleAddTeamMember}
-                            disabled={isAddingMember}
-                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                        >
-                            {isAddingMember ? 'Adding...' : 'Add Member'}
-                        </button>
-                    </div>
+        <div className="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
+            <h4 className="text-sm font-bold text-slate-700 mb-3">Add Team Member</h4>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                <div className="md:col-span-5">
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
+                    <input
+                        type="text"
+                        value={newMemberName}
+                        onChange={(e) => setNewMemberName(e.target.value)}
+                        placeholder="John Doe"
+                        className="w-full p-2 border border-slate-300 rounded text-sm focus:ring-indigo-500"
+                    />
                 </div>
-                <p className="text-xs text-slate-400 mt-2 italic">* The user must have already logged into AuDoc at least once.</p>
+                <div className="md:col-span-5">
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Role</label>
+                    <input
+                        type="text"
+                        value={newMemberRole}
+                        onChange={(e) => setNewMemberRole(e.target.value)}
+                        placeholder="Manager / Assistant"
+                        className="w-full p-2 border border-slate-300 rounded text-sm focus:ring-indigo-500"
+                    />
+                </div>
+                <div className="md:col-span-2">
+                    <button
+                        onClick={handleAddTeamMember}
+                        className="w-full px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded hover:bg-indigo-700 transition-colors"
+                    >
+                        Add
+                    </button>
+                </div>
             </div>
-        )}
+        </div>
         
         {teamMembers.length > 0 ? (
           <div className="overflow-hidden border rounded-md">
@@ -421,28 +370,18 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Access</th>
-                  {!isReadOnly && <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>}
+                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
                 {teamMembers.map((member) => (
                   <tr key={member.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 font-medium">{member.name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{member.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{member.role}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={`px-2 py-1 text-xs rounded-full ${member.permission === 'editor' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-                            {member.permission === 'editor' ? 'Read & Write' : 'Read Only'}
-                        </span>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button onClick={() => handleRemoveTeamMember(member.id)} className="text-red-600 hover:text-red-900">Remove</button>
                     </td>
-                    {!isReadOnly && (
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button onClick={() => handleRemoveTeamMember(member.id, member.email)} className="text-red-600 hover:text-red-900">Remove</button>
-                        </td>
-                    )}
                   </tr>
                 ))}
               </tbody>
@@ -470,7 +409,6 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
                 checked={data.ethicsChecks[item.key as keyof typeof data.ethicsChecks]}
                 onChange={() => updateNested('ethicsChecks', item.key)}
                 className="h-5 w-5 mt-0.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 flex-shrink-0"
-                disabled={isReadOnly}
               />
               <label className="ml-3 text-slate-700 text-sm">{item.label}</label>
             </div>
