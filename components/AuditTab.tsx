@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface AuditTabProps {
@@ -5,9 +6,10 @@ interface AuditTabProps {
   isActive: boolean;
   onClick: () => void;
   className?: string;
+  isReadOnly?: boolean;
 }
 
-const AuditTab: React.FC<AuditTabProps> = ({ title, isActive, onClick, className }) => {
+const AuditTab: React.FC<AuditTabProps> = ({ title, isActive, onClick, className, isReadOnly }) => {
   return (
     <button
       onClick={onClick}
