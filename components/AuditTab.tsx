@@ -6,10 +6,9 @@ interface AuditTabProps {
   isActive: boolean;
   onClick: () => void;
   className?: string;
-  isReadOnly?: boolean;
 }
 
-const AuditTab: React.FC<AuditTabProps> = ({ title, isActive, onClick, className, isReadOnly }) => {
+const AuditTab: React.FC<AuditTabProps> = ({ title, isActive, onClick, className }) => {
   return (
     <button
       onClick={onClick}
