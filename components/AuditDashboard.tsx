@@ -16,7 +16,8 @@ import Basics from './Basics';
 import PlanningAndRiskAssessment from './PlanningAndRiskAssessment';
 import MaterialityAndSampling from './MaterialityAndSampling';
 import AuditEvidence from './AuditEvidence';
-import { setSectionData, subscribeToSection } from '../services/db';
+import { setSectionData, subscribeToSection, checkEngagementPermissions } from '../services/db';
+import { auth } from '../firebase';
 
 interface AuditDashboardProps {
   client: Client;
@@ -38,27 +39,42 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  
+  // Permission State
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(true); // Default to safe state
+  const [checkingPerms, setCheckingPerms] = useState<boolean>(true);
 
-  // Sync team members from DB
+  // Check Permissions on Load
+  useEffect(() => {
+      const checkAccess = async () => {
+          if (auth.currentUser) {
+              const { isReadOnly } = await checkEngagementPermissions(engagementId, auth.currentUser.uid);
+              setIsReadOnly(isReadOnly);
+              setCheckingPerms(false);
+          }
+      };
+      checkAccess();
+  }, [engagementId]);
+
+  // Sync team members from DB (Array of objects in DB to Array in state)
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'basics/teamMembers', (data) => {
       if (data) {
-        setTeamMembers(data);
+        // Firebase returns objects keyed by ID, convert to array
+        const membersArray = Object.values(data) as TeamMember[];
+        setTeamMembers(membersArray);
+      } else {
+        setTeamMembers([]);
       }
     });
     return () => unsubscribe();
   }, [engagementId]);
 
-  // Wrapper for setTeamMembers to also update DB
+  // Wrapper for setTeamMembers to also update DB (Used by Basics Tab mainly)
   const handleSetTeamMembers = (action: React.SetStateAction<TeamMember[]>) => {
-    let newMembers;
-    if (typeof action === 'function') {
-        newMembers = action(teamMembers);
-    } else {
-        newMembers = action;
-    }
-    setTeamMembers(newMembers);
-    setSectionData(engagementId, 'basics/teamMembers', newMembers);
+    // In new logic, we add via specific DB calls in Basics.tsx, 
+    // but this prop is kept for compatibility if needed.
+    // The subscribeToSection above handles the sync.
   };
 
   const handleGenerateReport = useCallback((reportDetails: AuditReportDetails) => {
@@ -68,6 +84,14 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
   }, [client]);
 
   const ActiveTabComponent = auditTabs.find((tab) => tab.id === activeTabId)?.component;
+
+  if (checkingPerms) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-100">
+            <div className="text-slate-500">Verifying access...</div>
+        </div>
+      );
+  }
 
   return (
     <div className="flex min-h-screen bg-slate-100">
@@ -91,6 +115,13 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
           onMenuClick={() => setSidebarOpen(!isSidebarOpen)}
           onBack={onBack}
         />
+
+        {isReadOnly && (
+            <div className="mb-4 bg-amber-50 border-l-4 border-amber-500 p-4 rounded shadow-sm flex items-center">
+                <svg className="w-5 h-5 text-amber-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                <p className="text-sm text-amber-700 font-medium">You are viewing this engagement in <span className="font-bold">Read-Only</span> mode.</p>
+            </div>
+        )}
         
         <div className="mt-6">
           {ActiveTabComponent && (
@@ -101,6 +132,7 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
               generatedReport={generatedReport}
               teamMembers={teamMembers}
               setTeamMembers={handleSetTeamMembers}
+              isReadOnly={isReadOnly}
             />
           )}
         </div>
