@@ -21,14 +21,10 @@ export interface AuditReportDetails {
   includeOtherInformation?: boolean;
 }
 
-export type PermissionLevel = 'editor' | 'viewer';
-
 export interface TeamMember {
   id: string;
   name: string;
   role: string;
-  email: string;
-  permission: PermissionLevel;
 }
 
 export interface AuditTabProps {
@@ -38,7 +34,6 @@ export interface AuditTabProps {
   generatedReport?: string | null;
   teamMembers?: TeamMember[];
   setTeamMembers?: React.Dispatch<React.SetStateAction<TeamMember[]>>;
-  isReadOnly?: boolean; // New prop to control access
 }
 
 export interface AuditTabInfo {
