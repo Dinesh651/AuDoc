@@ -3,9 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AuditTabProps } from '../types';
 import { updateSectionData, subscribeToSection } from '../services/db';
 
-// ... (EyeIcon and TextAreaWithAutoFill - assume TextArea accepts disabled prop)
-
-const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagementId, isReadOnly }) => {
+const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagementId }) => {
   const [data, setData] = useState({
     overallStrategy: '',
     auditPlan: '',
@@ -28,7 +26,6 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
   }, [engagementId]);
 
   const updateData = (key: keyof typeof data, value: string) => {
-      if (isReadOnly) return;
       setData(prev => {
           const newState = { ...prev, [key]: value };
           if (isLoaded) {
@@ -38,8 +35,7 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
       });
   };
 
-  // Helper for text areas
-  const textAreaClass = `w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 resize-y shadow-sm ${isReadOnly ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'}`;
+  const textAreaClass = "w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 resize-y shadow-sm bg-white";
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -54,7 +50,6 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
                     className={textAreaClass}
                     value={data.overallStrategy}
                     onChange={(e) => updateData('overallStrategy', e.target.value)}
-                    disabled={isReadOnly}
                     placeholder="Document strategy..."
                 />
             </div>
@@ -65,14 +60,11 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
                     className={textAreaClass}
                     value={data.auditPlan}
                     onChange={(e) => updateData('auditPlan', e.target.value)}
-                    disabled={isReadOnly}
                     placeholder="Document plan..."
                 />
             </div>
         </div>
       </div>
-      
-      {/* ... Other sections follow same pattern with disabled={isReadOnly} ... */}
     </div>
   );
 };
