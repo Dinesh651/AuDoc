@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { createEngagement, getUserEngagements, saveUserProfile, checkAndAcceptInvitations } from './services/db';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
 import { auth, googleProvider } from './firebase';
 import { Client } from './types';
@@ -22,23 +23,24 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
 
   // Handle Auth Change
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        // 1. Save/Update User in DB (The User Tree Root)
-        await saveUserProfile(currentUser);
-        
-        // 2. Fetch their specific engagements
-        fetchEngagements(currentUser.uid);
-        setView('dashboard');
-      } else {
-        setView('landing');
-      }
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    setUser(currentUser);
+    if (currentUser) {
+      await saveUserProfile(currentUser);
+      
+      // ADD THIS LINE:
+      await checkAndAcceptInvitations(currentUser);
+      
+      fetchEngagements(currentUser.uid);
+      setView('dashboard');
+    } else {
+      setView('landing');
+    }
+    setAuthLoading(false);
+  });
+  return () => unsubscribe();
+}, []);
 
   const fetchEngagements = async (userId: string) => {
     try {
