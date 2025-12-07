@@ -7,6 +7,7 @@ export interface Client {
   fyPeriodEnd: string; // YYYY-MM-DD format
   frf: string;
   isListed?: boolean;
+  ownerUserId?: string;
 }
 
 export interface AuditReportDetails {
@@ -25,6 +26,9 @@ export interface TeamMember {
   id: string;
   name: string;
   role: string;
+  email: string;  // ADD THIS
+  status?: 'invited' | 'active';  // ADD THIS
+  invitedAt?: string;  // ADD THIS
 }
 
 export interface AuditTabProps {
