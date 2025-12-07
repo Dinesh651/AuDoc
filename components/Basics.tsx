@@ -4,36 +4,6 @@ import { AuditTabProps } from '../types';
 import { updateSectionData, subscribeToSection } from '../services/db';
 import { updateSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
 
-const addTeamMember = async () => {
-  if (newMemberName.trim() && newMemberRole.trim() && newMemberEmail.trim() && setTeamMembers) {
-    if (!validateEmail(newMemberEmail)) {
-      setEmailError('Please enter a valid email address');
-      return;
-    }
-    
-    const newMember = {
-      id: Date.now().toString(),
-      name: newMemberName,
-      role: newMemberRole,
-      email: newMemberEmail.toLowerCase(),
-      status: 'invited' as const,
-      invitedAt: new Date().toISOString()
-    };
-    
-    const updatedMembers = [...teamMembers, newMember];
-    setTeamMembers(updatedMembers);
-    
-    // Process invitations immediately
-    if (client.ownerUserId) {
-      await processTeamMemberInvitations(engagementId, updatedMembers, client.ownerUserId);
-    }
-    
-    setNewMemberName('');
-    setNewMemberRole('');
-    setNewMemberEmail('');
-    setEmailError('');
-  }
-};
 
 const DraftModal: React.FC<{
   isOpen: boolean;
@@ -209,16 +179,36 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
   const [draftModalOpen, setDraftModalOpen] = useState(false);
   const [draftContent, setDraftContent] = useState('');
 
-  const addTeamMember = () => {
-    if (newMemberName.trim() && newMemberRole.trim() && setTeamMembers) {
-      setTeamMembers([
-        ...teamMembers,
-        { id: Date.now().toString(), name: newMemberName, role: newMemberRole },
-      ]);
-      setNewMemberName('');
-      setNewMemberRole('');
+const addTeamMember = async () => {
+  if (newMemberName.trim() && newMemberRole.trim() && newMemberEmail.trim() && setTeamMembers) {
+    if (!validateEmail(newMemberEmail)) {
+      setEmailError('Please enter a valid email address');
+      return;
     }
-  };
+    
+    const newMember = {
+      id: Date.now().toString(),
+      name: newMemberName,
+      role: newMemberRole,
+      email: newMemberEmail.toLowerCase(),
+      status: 'invited' as const,
+      invitedAt: new Date().toISOString()
+    };
+    
+    const updatedMembers = [...teamMembers, newMember];
+    setTeamMembers(updatedMembers);
+    
+    // Process invitations immediately
+    if (client.ownerUserId) {
+      await processTeamMemberInvitations(engagementId, updatedMembers, client.ownerUserId);
+    }
+    
+    setNewMemberName('');
+    setNewMemberRole('');
+    setNewMemberEmail('');
+    setEmailError('');
+  }
+};
 
   const removeTeamMember = (id: string) => {
     if (setTeamMembers) {
