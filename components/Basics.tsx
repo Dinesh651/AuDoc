@@ -1,6 +1,9 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { AuditTabProps, TeamMember } from '../types';
+import { AuditTabProps } from '../types';
 import { updateSectionData, subscribeToSection } from '../services/db';
+import { updateSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
+
 
 const DraftModal: React.FC<{
   isOpen: boolean;
@@ -98,7 +101,7 @@ const DateInput: React.FC<{
 };
 
 
-const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [], setTeamMembers, currentUser }) => {
+const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [], setTeamMembers }) => {
   const [data, setData] = useState({
     agmDate: '',
     appointmentDate: '',
@@ -131,7 +134,9 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'basics', (fetchedData) => {
       if (fetchedData) {
-        // We only merge existing fields to avoid overwriting with undefined
+        // We only merge existing fields to avoid overwriting with undefined if strictly enforcing types, 
+        // but here simple spread works nicely.
+        // Exclude teamMembers from here as it's handled by parent
         const { teamMembers, ...rest } = fetchedData; 
         setData(prev => ({ ...prev, ...rest }));
       }
@@ -148,6 +153,10 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
       updateSectionData(engagementId, 'basics', updates);
     }
   };
+  const validateEmail = (email: string): boolean => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
 
   // Specific update for nested objects
   const updateNested = (section: 'acceptanceChecks' | 'sa210Checks' | 'ethicsChecks', key: string) => {
@@ -159,57 +168,49 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
   };
 
 
-  // Local state for UI inputs
+  // Local state for UI inputs that don't need immediate persistence until "Add"
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRole, setNewMemberRole] = useState('');
-  const [newMemberAccess, setNewMemberAccess] = useState<'admin' | 'member'>('member');
+
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
 
   // Draft Modal
   const [draftModalOpen, setDraftModalOpen] = useState(false);
   const [draftContent, setDraftContent] = useState('');
 
-  // Determine current user's access level
-  const myAccessLevel = teamMembers.find(m => m.userId === currentUser.uid)?.accessLevel || 'member';
-  const isAdmin = myAccessLevel === 'admin';
-
-  const addTeamMember = () => {
-    if (!isAdmin) {
-        alert("Only Admins can add new team members.");
-        return;
+const addTeamMember = async () => {
+  if (newMemberName.trim() && newMemberRole.trim() && newMemberEmail.trim() && setTeamMembers) {
+    if (!validateEmail(newMemberEmail)) {
+      setEmailError('Please enter a valid email address');
+      return;
     }
-
-    if (newMemberName.trim() && newMemberRole.trim() && setTeamMembers) {
-      const newMember: TeamMember = {
-        id: Date.now().toString(),
-        name: newMemberName,
-        role: newMemberRole,
-        accessLevel: newMemberAccess,
-        // In a real app, you'd likely want to input their email and match it to a user ID upon invitation
-        // For now, we leave userId undefined for manual entries
-      };
-      
-      setTeamMembers([...teamMembers, newMember]);
-      setNewMemberName('');
-      setNewMemberRole('');
-      setNewMemberAccess('member');
+    
+    const newMember = {
+      id: Date.now().toString(),
+      name: newMemberName,
+      role: newMemberRole,
+      email: newMemberEmail.toLowerCase(),
+      status: 'invited' as const,
+      invitedAt: new Date().toISOString()
+    };
+    
+    const updatedMembers = [...teamMembers, newMember];
+    setTeamMembers(updatedMembers);
+    
+    // Process invitations immediately
+    if (client.ownerUserId) {
+      await processTeamMemberInvitations(engagementId, updatedMembers, client.ownerUserId);
     }
-  };
+    
+    setNewMemberName('');
+    setNewMemberRole('');
+    setNewMemberEmail('');
+    setEmailError('');
+  }
+};
 
   const removeTeamMember = (id: string) => {
-    if (!isAdmin) {
-        alert("Only Admins can remove team members.");
-        return;
-    }
-    
-    // Prevent removing the last admin
-    const memberToRemove = teamMembers.find(m => m.id === id);
-    const adminCount = teamMembers.filter(m => m.accessLevel === 'admin').length;
-    
-    if (memberToRemove?.accessLevel === 'admin' && adminCount <= 1) {
-        alert("You cannot remove the last Admin from the engagement.");
-        return;
-    }
-
     if (setTeamMembers) {
       setTeamMembers(teamMembers.filter((m) => m.id !== id));
     }
@@ -358,7 +359,7 @@ Date: __________________
 
       {/* Section 4: Engagement Partner */}
       <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-emerald-500">
-        <h3 className="text-xl font-bold text-slate-800 mb-4">4. Engagement Partner Details</h3>
+        <h3 className="text-xl font-bold text-slate-800 mb-4">4. Engagement Partner</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-1">Engagement Partner Name</label>
@@ -383,99 +384,77 @@ Date: __________________
         </div>
       </div>
 
-      {/* Section 5: Audit Team */}
+            {/* Section 5: Audit Team */}
       <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-teal-500">
-        <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-bold text-slate-800">5. Audit Team Structure</h3>
-            {!isAdmin && (
-                <span className="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-1 rounded">View Only</span>
-            )}
-        </div>
+        <h3 className="text-xl font-bold text-slate-800 mb-4">5. Audit Team Structure</h3>
+        <p className="text-sm text-slate-600 mb-4">Add team members with their email addresses. They will automatically get access when they sign in.</p>
         
-        {isAdmin && (
-            <div className="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
-            <h4 className="text-sm font-semibold text-slate-700 mb-2">Add New Team Member</h4>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-                <div className="col-span-1">
-                    <label className="block text-xs text-slate-500 mb-1">Name</label>
-                    <input
-                        type="text"
-                        value={newMemberName}
-                        onChange={(e) => setNewMemberName(e.target.value)}
-                        placeholder="John Doe"
-                        className="w-full p-2.5 bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
-                    />
-                </div>
-                <div className="col-span-1">
-                    <label className="block text-xs text-slate-500 mb-1">Audit Role (Job Title)</label>
-                    <input
-                        type="text"
-                        value={newMemberRole}
-                        onChange={(e) => setNewMemberRole(e.target.value)}
-                        placeholder="e.g., Manager"
-                        className="w-full p-2.5 bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
-                    />
-                </div>
-                <div className="col-span-1">
-                    <label className="block text-xs text-slate-500 mb-1">Access Level</label>
-                    <select
-                        value={newMemberAccess}
-                        onChange={(e) => setNewMemberAccess(e.target.value as 'admin' | 'member')}
-                        className="w-full p-2.5 bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
-                    >
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                </div>
-                <div className="col-span-1">
-                    <button
-                        onClick={addTeamMember}
-                        className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 transition-colors"
-                    >
-                        Add Member
-                    </button>
-                </div>
-            </div>
-            </div>
-        )}
+        <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <input
+            type="text"
+            value={newMemberName}
+            onChange={(e) => setNewMemberName(e.target.value)}
+            placeholder="Name"
+            className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+          />
+          <div>
+            <input
+              type="email"
+              value={newMemberEmail}
+              onChange={(e) => {
+                setNewMemberEmail(e.target.value);
+                setEmailError('');
+              }}
+              placeholder="Email (Gmail)"
+              className={`w-full p-2.5 bg-slate-50 border ${emailError ? 'border-red-500' : 'border-slate-300'} rounded-md focus:ring-2 focus:ring-indigo-500`}
+            />
+            {emailError && <p className="text-red-500 text-xs mt-1">{emailError}</p>}
+          </div>
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={newMemberRole}
+              onChange={(e) => setNewMemberRole(e.target.value)}
+              placeholder="Role"
+              className="flex-1 p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={addTeamMember}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+            >
+              Add
+            </button>
+          </div>
+        </div>
         
         {teamMembers.length > 0 ? (
           <div className="overflow-hidden border rounded-md">
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Audit Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Access</th>
-                  {isAdmin && (
-                    <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
-                  )}
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Action</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
                 {teamMembers.map((member) => (
                   <tr key={member.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 font-medium">{member.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">{member.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{member.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{member.role}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            member.accessLevel === 'admin' 
-                            ? 'bg-indigo-100 text-indigo-800' 
-                            : 'bg-green-100 text-green-800'
-                        }`}>
-                            {member.accessLevel === 'admin' ? 'Admin' : 'Member'}
-                        </span>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {member.status === 'active' ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Invited</span>
+                      )}
                     </td>
-                    {isAdmin && (
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button 
-                            onClick={() => removeTeamMember(member.id)} 
-                            className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1 rounded transition-colors"
-                        >
-                            Remove
-                        </button>
-                        </td>
-                    )}
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                      <button onClick={() => removeTeamMember(member.id)} className="text-red-600 hover:text-red-900">Remove</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -484,6 +463,12 @@ Date: __________________
         ) : (
           <p className="text-slate-500 italic text-sm">No team members added yet.</p>
         )}
+        
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-md">
+          <p className="text-xs text-blue-700">
+            <strong>How it works:</strong> Team members will automatically receive access when they sign in with their Gmail account.
+          </p>
+        </div>
       </div>
 
       {/* Section 6: Overall Objective (NSA 200) */}
