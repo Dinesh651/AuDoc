@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { Client, AuditTabInfo, AuditReportDetails, TeamMember } from '../types';
 import ReportingAndConclusion from './ReportingAndConclusion';
@@ -16,15 +17,15 @@ import PlanningAndRiskAssessment from './PlanningAndRiskAssessment';
 import MaterialityAndSampling from './MaterialityAndSampling';
 import AuditEvidence from './AuditEvidence';
 import { setSectionData, subscribeToSection } from '../services/db';
+import { setSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
 
 interface AuditDashboardProps {
   client: Client;
   engagementId: string;
-  currentUser: { uid: string; displayName: string | null; email: string | null };
   onBack: () => void;
 }
 
-const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, currentUser, onBack }) => {
+const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, onBack }) => {
   const auditTabs: AuditTabInfo[] = [
     { id: 'basics', title: 'Basics', icon: FileTextIcon, component: Basics },
     { id: 'romm', title: 'Planning and Risk Assessment', icon: ChecklistIcon, component: PlanningAndRiskAssessment },
@@ -38,40 +39,19 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, c
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [isTeamLoaded, setIsTeamLoaded] = useState(false);
 
   // Sync team members from DB
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'basics/teamMembers', (data) => {
-      if (data && Array.isArray(data)) {
+      if (data) {
         setTeamMembers(data);
-        setIsTeamLoaded(true);
-      } else {
-        // If no team members exist (new engagement), initialize current user as Admin
-        if (!isTeamLoaded) {
-            const initialAdmin: TeamMember = {
-                id: currentUser.uid,
-                name: currentUser.displayName || 'Audit Lead',
-                role: 'Engagement Partner', // Default Job Title
-                accessLevel: 'admin',
-                userId: currentUser.uid,
-                email: currentUser.email || undefined
-            };
-            // We set it directly here, which triggers the 'handleSetTeamMembers' logic if we called it, 
-            // but since we are inside the subscription callback, we should update DB directly to avoid loops 
-            // or just set local state and let the user "save" it. 
-            // Better approach: Write to DB immediately for the initial setup.
-            setSectionData(engagementId, 'basics/teamMembers', [initialAdmin]);
-            setTeamMembers([initialAdmin]);
-            setIsTeamLoaded(true);
-        }
       }
     });
     return () => unsubscribe();
-  }, [engagementId, currentUser, isTeamLoaded]);
+  }, [engagementId]);
 
   // Wrapper for setTeamMembers to also update DB
-  const handleSetTeamMembers = (action: React.SetStateAction<TeamMember[]>) => {
+  const handleSetTeamMembers = async (action: React.SetStateAction<TeamMember[]>) => {
     let newMembers;
     if (typeof action === 'function') {
         newMembers = action(teamMembers);
@@ -79,7 +59,14 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, c
         newMembers = action;
     }
     setTeamMembers(newMembers);
-    setSectionData(engagementId, 'basics/teamMembers', newMembers);
+    
+    // Save to database
+    await setSectionData(engagementId, 'basics/teamMembers', newMembers);
+    
+    // Process invitations for members with 'invited' status
+    if (client.ownerUserId) {
+      await processTeamMemberInvitations(engagementId, newMembers, client.ownerUserId);
+    }
   };
 
   const handleGenerateReport = useCallback((reportDetails: AuditReportDetails) => {
@@ -118,7 +105,6 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, c
             <ActiveTabComponent
               client={client}
               engagementId={engagementId}
-              currentUser={currentUser}
               onGenerateReport={handleGenerateReport}
               generatedReport={generatedReport}
               teamMembers={teamMembers}
