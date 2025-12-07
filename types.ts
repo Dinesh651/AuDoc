@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export interface Client {
@@ -6,33 +7,33 @@ export interface Client {
   fyPeriodEnd: string; // YYYY-MM-DD format
   frf: string;
   isListed?: boolean;
+  ownerUserId?: string;
 }
 
 export interface AuditReportDetails {
   engagementPartnerName: string;
-  designation: string; 
+  designation: string; // Replaces membershipNumber
   auditFirmName: string;
   reportDate: string; // YYYY-MM-DD format
   reportPlace: string;
   keyAuditMatters: string;
-  udin: string; 
-  firmRegistrationNumber: string; 
+  udin: string; // Added for UDIN
+  firmRegistrationNumber: string; // Added for firm registration
   includeOtherInformation?: boolean;
 }
 
 export interface TeamMember {
   id: string;
   name: string;
-  role: string; // Job Title (e.g. Engagement Partner, Audit Manager)
-  accessLevel: 'admin' | 'member'; // System Permission Level
-  userId?: string; // Links to the Firebase Auth UID
-  email?: string;
+  role: string;
+  email: string;  // ADD THIS
+  status?: 'invited' | 'active';  // ADD THIS
+  invitedAt?: string;  // ADD THIS
 }
 
 export interface AuditTabProps {
   client: Client;
   engagementId: string;
-  currentUser: { uid: string; displayName: string | null; email: string | null };
   onGenerateReport?: (reportDetails: AuditReportDetails) => string;
   generatedReport?: string | null;
   teamMembers?: TeamMember[];
