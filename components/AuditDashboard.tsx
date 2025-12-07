@@ -16,7 +16,7 @@ import Basics from './Basics';
 import PlanningAndRiskAssessment from './PlanningAndRiskAssessment';
 import MaterialityAndSampling from './MaterialityAndSampling';
 import AuditEvidence from './AuditEvidence';
-import { subscribeToSection } from '../services/db';
+import { setSectionData, subscribeToSection } from '../services/db';
 
 interface AuditDashboardProps {
   client: Client;
@@ -38,23 +38,27 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  
-  // Sync team members from DB (Array of objects in DB to Array in state)
+
+  // Sync team members from DB
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'basics/teamMembers', (data) => {
       if (data) {
-        // Firebase returns objects keyed by ID, convert to array
-        const membersArray = Object.values(data) as TeamMember[];
-        setTeamMembers(membersArray);
-      } else {
-        setTeamMembers([]);
+        setTeamMembers(data);
       }
     });
     return () => unsubscribe();
   }, [engagementId]);
 
+  // Wrapper for setTeamMembers to also update DB
   const handleSetTeamMembers = (action: React.SetStateAction<TeamMember[]>) => {
-    // Kept for compatibility if needed, though subscribeToSection handles updates
+    let newMembers;
+    if (typeof action === 'function') {
+        newMembers = action(teamMembers);
+    } else {
+        newMembers = action;
+    }
+    setTeamMembers(newMembers);
+    setSectionData(engagementId, 'basics/teamMembers', newMembers);
   };
 
   const handleGenerateReport = useCallback((reportDetails: AuditReportDetails) => {
