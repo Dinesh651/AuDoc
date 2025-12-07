@@ -19,36 +19,28 @@ export const saveUserProfile = async (user: User) => {
 // --- Engagement Management ---
 
 export const createEngagement = async (client: Client, userId: string): Promise<string> => {
-  // 1. Get a key for the new engagement
   const newEngagementKey = push(child(ref(db), 'engagements')).key;
   if (!newEngagementKey) throw new Error("Failed to generate engagement key");
   
   const timestamp = new Date().toISOString();
 
-  // 2. Prepare the engagement data (The heavy lifting data)
   const engagementData = {
-    client,
+    client: { ...client, ownerUserId: userId },  // CHANGE THIS LINE
     userId,
     status: 'In Progress',
     createdAt: timestamp
   };
 
-  // 3. Prepare the user-specific summary (The User Tree Node)
-  // This allows us to list projects without searching the whole database
   const userEngagementSummary = {
     id: newEngagementKey,
-    client,
+    client: { ...client, ownerUserId: userId },  // CHANGE THIS LINE
     status: 'In Progress',
-    createdAt: timestamp
+    createdAt: timestamp,
+    role: 'owner'  // ADD THIS LINE
   };
 
-  // 4. Atomic Update: Fan-out data to both locations simultaneously
   const updates: any = {};
-  
-  // Path A: Global Engagement Data (where sections like SA 500 live)
   updates[`/engagements/${newEngagementKey}`] = engagementData;
-  
-  // Path B: User's Personal Engagement Tree (for the dashboard list)
   updates[`/users/${userId}/engagements/${newEngagementKey}`] = userEngagementSummary;
 
   await update(ref(db), updates);
