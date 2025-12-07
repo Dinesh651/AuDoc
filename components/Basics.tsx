@@ -2,6 +2,38 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AuditTabProps } from '../types';
 import { updateSectionData, subscribeToSection } from '../services/db';
+import { updateSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
+
+const addTeamMember = async () => {
+  if (newMemberName.trim() && newMemberRole.trim() && newMemberEmail.trim() && setTeamMembers) {
+    if (!validateEmail(newMemberEmail)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
+    
+    const newMember = {
+      id: Date.now().toString(),
+      name: newMemberName,
+      role: newMemberRole,
+      email: newMemberEmail.toLowerCase(),
+      status: 'invited' as const,
+      invitedAt: new Date().toISOString()
+    };
+    
+    const updatedMembers = [...teamMembers, newMember];
+    setTeamMembers(updatedMembers);
+    
+    // Process invitations immediately
+    if (client.ownerUserId) {
+      await processTeamMemberInvitations(engagementId, updatedMembers, client.ownerUserId);
+    }
+    
+    setNewMemberName('');
+    setNewMemberRole('');
+    setNewMemberEmail('');
+    setEmailError('');
+  }
+};
 
 const DraftModal: React.FC<{
   isOpen: boolean;
@@ -151,6 +183,10 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
       updateSectionData(engagementId, 'basics', updates);
     }
   };
+  const validateEmail = (email: string): boolean => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
 
   // Specific update for nested objects
   const updateNested = (section: 'acceptanceChecks' | 'sa210Checks' | 'ethicsChecks', key: string) => {
@@ -165,6 +201,9 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
   // Local state for UI inputs that don't need immediate persistence until "Add"
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRole, setNewMemberRole] = useState('');
+
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
 
   // Draft Modal
   const [draftModalOpen, setDraftModalOpen] = useState(false);
