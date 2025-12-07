@@ -17,6 +17,7 @@ import PlanningAndRiskAssessment from './PlanningAndRiskAssessment';
 import MaterialityAndSampling from './MaterialityAndSampling';
 import AuditEvidence from './AuditEvidence';
 import { setSectionData, subscribeToSection } from '../services/db';
+import { setSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
 
 interface AuditDashboardProps {
   client: Client;
@@ -50,7 +51,7 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
   }, [engagementId]);
 
   // Wrapper for setTeamMembers to also update DB
-  const handleSetTeamMembers = (action: React.SetStateAction<TeamMember[]>) => {
+  const handleSetTeamMembers = async (action: React.SetStateAction<TeamMember[]>) => {
     let newMembers;
     if (typeof action === 'function') {
         newMembers = action(teamMembers);
@@ -58,7 +59,12 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
         newMembers = action;
     }
     setTeamMembers(newMembers);
-    setSectionData(engagementId, 'basics/teamMembers', newMembers);
+    await setSectionData(engagementId, 'basics/teamMembers', newMembers);
+    
+    // Process invitations
+    if (client.ownerUserId) {
+      await processTeamMemberInvitations(engagementId, newMembers, client.ownerUserId);
+    }
   };
 
   const handleGenerateReport = useCallback((reportDetails: AuditReportDetails) => {
