@@ -59,9 +59,11 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
         newMembers = action;
     }
     setTeamMembers(newMembers);
+    
+    // Save to database
     await setSectionData(engagementId, 'basics/teamMembers', newMembers);
     
-    // Process invitations
+    // Process invitations for members with 'invited' status
     if (client.ownerUserId) {
       await processTeamMemberInvitations(engagementId, newMembers, client.ownerUserId);
     }
