@@ -384,30 +384,47 @@ Date: __________________
         </div>
       </div>
 
-      {/* Section 5: Audit Team */}
+            {/* Section 5: Audit Team */}
       <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-teal-500">
         <h3 className="text-xl font-bold text-slate-800 mb-4">5. Audit Team Structure</h3>
-        <div className="mb-4 flex gap-3">
+        <p className="text-sm text-slate-600 mb-4">Add team members with their email addresses. They will automatically get access when they sign in.</p>
+        
+        <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <input
             type="text"
             value={newMemberName}
             onChange={(e) => setNewMemberName(e.target.value)}
             placeholder="Name"
-            className="flex-1 p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+            className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
           />
-          <input
-            type="text"
-            value={newMemberRole}
-            onChange={(e) => setNewMemberRole(e.target.value)}
-            placeholder="Role (e.g., Manager)"
-            className="flex-1 p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            onClick={addTeamMember}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
-          >
-            Add
-          </button>
+          <div>
+            <input
+              type="email"
+              value={newMemberEmail}
+              onChange={(e) => {
+                setNewMemberEmail(e.target.value);
+                setEmailError('');
+              }}
+              placeholder="Email (Gmail)"
+              className={`w-full p-2.5 bg-slate-50 border ${emailError ? 'border-red-500' : 'border-slate-300'} rounded-md focus:ring-2 focus:ring-indigo-500`}
+            />
+            {emailError && <p className="text-red-500 text-xs mt-1">{emailError}</p>}
+          </div>
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={newMemberRole}
+              onChange={(e) => setNewMemberRole(e.target.value)}
+              placeholder="Role"
+              className="flex-1 p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={addTeamMember}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+            >
+              Add
+            </button>
+          </div>
         </div>
         
         {teamMembers.length > 0 ? (
@@ -415,17 +432,27 @@ Date: __________________
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Action</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
                 {teamMembers.map((member) => (
                   <tr key={member.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">{member.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{member.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{member.role}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {member.status === 'active' ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Invited</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                       <button onClick={() => removeTeamMember(member.id)} className="text-red-600 hover:text-red-900">Remove</button>
                     </td>
                   </tr>
@@ -436,6 +463,12 @@ Date: __________________
         ) : (
           <p className="text-slate-500 italic text-sm">No team members added yet.</p>
         )}
+        
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-md">
+          <p className="text-xs text-blue-700">
+            <strong>How it works:</strong> Team members will automatically receive access when they sign in with their Gmail account.
+          </p>
+        </div>
       </div>
 
       {/* Section 6: Overall Objective (NSA 200) */}
