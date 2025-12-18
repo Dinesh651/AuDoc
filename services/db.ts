@@ -1,6 +1,7 @@
+
 import { db } from '../firebase';
-import { ref, set, update, onValue, push, get, child, remove } from 'firebase/database';
-import { Client, TeamMember } from '../types';
+import { ref, set, update, onValue, push, get, child } from 'firebase/database';
+import { Client } from '../types';
 import { User } from 'firebase/auth';
 
 // --- User Management ---
@@ -24,7 +25,7 @@ export const createEngagement = async (client: Client, userId: string): Promise<
   const timestamp = new Date().toISOString();
 
   const engagementData = {
-    client: { ...client, ownerUserId: userId },
+    client: { ...client, ownerUserId: userId },  // CHANGE THIS LINE
     userId,
     status: 'In Progress',
     createdAt: timestamp
@@ -32,10 +33,10 @@ export const createEngagement = async (client: Client, userId: string): Promise<
 
   const userEngagementSummary = {
     id: newEngagementKey,
-    client: { ...client, ownerUserId: userId },
+    client: { ...client, ownerUserId: userId },  // CHANGE THIS LINE
     status: 'In Progress',
     createdAt: timestamp,
-    role: 'owner'
+    role: 'owner'  // ADD THIS LINE
   };
 
   const updates: any = {};
@@ -48,193 +49,19 @@ export const createEngagement = async (client: Client, userId: string): Promise<
 };
 
 export const getUserEngagements = async (userId: string): Promise<{ id: string; client: Client; status: string; createdAt: string }[]> => {
+  // Fetch directly from the user's tree. No indexing required. Fast and Secure.
   const userEngagementsRef = ref(db, `users/${userId}/engagements`);
   
   const snapshot = await get(userEngagementsRef);
   if (snapshot.exists()) {
     const data = snapshot.val();
+    // Convert object to array and sort by date
     const engagements = Object.values(data) as { id: string; client: Client; status: string; createdAt: string }[];
     return engagements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
   return [];
 };
-
-// --- Team Member & Invitation Management ---
-
-export const inviteTeamMember = async (
-  engagementId: string,
-  email: string,
-  role: string,
-  inviterName: string
-): Promise<void> => {
-  const emailKey = email.toLowerCase().replace(/[.@]/g, '_');
-  const timestamp = new Date().toISOString();
-
-  // Check if user already exists
-  const usersRef = ref(db, 'users');
-  const usersSnapshot = await get(usersRef);
-  let existingUserId: string | null = null;
-
-  if (usersSnapshot.exists()) {
-    const users = usersSnapshot.val();
-    for (const uid in users) {
-      if (users[uid].profile?.email?.toLowerCase() === email.toLowerCase()) {
-        existingUserId = uid;
-        break;
-      }
-    }
-  }
-
-  const updates: any = {};
-
-  // Create invitation record
-  updates[`/invitations/${emailKey}/${engagementId}`] = {
-    engagementId,
-    email,
-    role,
-    inviterName,
-    invitedAt: timestamp,
-    status: 'pending',
-    existingUserId
-  };
-
-  // If user exists, also add to their pending invitations
-  if (existingUserId) {
-    updates[`/users/${existingUserId}/pendingInvitations/${engagementId}`] = {
-      engagementId,
-      role,
-      inviterName,
-      invitedAt: timestamp
-    };
-  }
-
-  await update(ref(db), updates);
-};
-
-export const checkAndAcceptInvitations = async (user: User) => {
-  const userEmail = user.email?.toLowerCase();
-  if (!userEmail) return;
-
-  const emailKey = userEmail.replace(/[.@]/g, '_');
-  const invitationsRef = ref(db, `invitations/${emailKey}`);
-  const snapshot = await get(invitationsRef);
-
-  if (!snapshot.exists()) return;
-
-  const invitations = snapshot.val();
-  const updates: any = {};
-
-  for (const engagementId in invitations) {
-    const invitation = invitations[engagementId];
-    
-    // Get engagement data
-    const engagementRef = ref(db, `engagements/${engagementId}`);
-    const engagementSnap = await get(engagementRef);
-    
-    if (engagementSnap.exists()) {
-      const engagementData = engagementSnap.val();
-      
-      // Add engagement to user's list
-      updates[`/users/${user.uid}/engagements/${engagementId}`] = {
-        id: engagementId,
-        client: engagementData.client,
-        status: engagementData.status,
-        createdAt: engagementData.createdAt,
-        role: invitation.role
-      };
-
-      // Update team member status in basics section if exists
-      const basicsRef = ref(db, `engagements/${engagementId}/basics/teamMembers`);
-      const teamMembersSnapshot = await get(basicsRef);
-      
-      if (teamMembersSnapshot.exists()) {
-        const teamMembers = teamMembersSnapshot.val();
-        if (Array.isArray(teamMembers)) {
-          teamMembers.forEach((member: any, index: number) => {
-            if (member.email?.toLowerCase() === userEmail && member.status === 'invited') {
-              updates[`/engagements/${engagementId}/basics/teamMembers/${index}/status`] = 'active';
-              updates[`/engagements/${engagementId}/basics/teamMembers/${index}/userId`] = user.uid;
-            }
-          });
-        }
-      }
-    }
-  }
-
-  // Remove processed invitations
-  updates[`/invitations/${emailKey}`] = null;
-  updates[`/users/${user.uid}/pendingInvitations`] = null;
-
-  if (Object.keys(updates).length > 0) {
-    await update(ref(db), updates);
-  }
-};
-
-export const getTeamMembers = async (engagementId: string): Promise<TeamMember[]> => {
-  const teamMembersRef = ref(db, `engagements/${engagementId}/basics/teamMembers`);
-  const snapshot = await get(teamMembersRef);
-  
-  if (snapshot.exists()) {
-    const data = snapshot.val();
-    if (Array.isArray(data)) {
-      return data.map((member, index) => ({
-        ...member,
-        id: member.id || `member-${index}`
-      }));
-    }
-  }
-  return [];
-};
-
-export const getPendingInvitations = async (engagementId: string): Promise<any[]> => {
-  const invitationsRef = ref(db, 'invitations');
-  const snapshot = await get(invitationsRef);
-  
-  if (!snapshot.exists()) return [];
-  
-  const pending: any[] = [];
-  const invitations = snapshot.val();
-  
-  for (const emailKey in invitations) {
-    const userInvitations = invitations[emailKey];
-    if (userInvitations[engagementId]) {
-      const invitation = userInvitations[engagementId];
-      if (invitation.status === 'pending') {
-        pending.push({
-          id: `${emailKey}-${engagementId}`,
-          emailKey,
-          ...invitation
-        });
-      }
-    }
-  }
-  
-  return pending;
-};
-
-export const saveTeamMembers = async (engagementId: string, teamMembers: TeamMember[]): Promise<void> => {
-  const teamMembersRef = ref(db, `engagements/${engagementId}/basics/teamMembers`);
-  await set(teamMembersRef, teamMembers);
-};
-
-export const removeTeamMember = async (engagementId: string, memberIndex: number): Promise<void> => {
-  const teamMembersRef = ref(db, `engagements/${engagementId}/basics/teamMembers`);
-  const snapshot = await get(teamMembersRef);
-  
-  if (snapshot.exists()) {
-    const teamMembers = snapshot.val();
-    if (Array.isArray(teamMembers)) {
-      teamMembers.splice(memberIndex, 1);
-      await set(teamMembersRef, teamMembers);
-    }
-  }
-};
-
-export const cancelInvitation = async (emailKey: string, engagementId: string): Promise<void> => {
-  const invitationRef = ref(db, `invitations/${emailKey}/${engagementId}`);
-  await remove(invitationRef);
-};
-
+// Add after getUserEngagements function
 export const processTeamMemberInvitations = async (
   engagementId: string,
   teamMembers: TeamMember[],
@@ -251,9 +78,7 @@ export const processTeamMemberInvitations = async (
         invitedBy: ownerUserId,
         invitedAt: member.invitedAt || new Date().toISOString(),
         role: member.role,
-        memberName: member.name,
-        email: member.email,
-        status: 'pending'
+        memberName: member.name
       };
     }
   }
@@ -263,8 +88,60 @@ export const processTeamMemberInvitations = async (
   }
 };
 
+export const checkAndAcceptInvitations = async (user: User) => {
+  const userEmail = user.email?.toLowerCase();
+  if (!userEmail) return;
+
+  const emailKey = userEmail.replace(/[.@]/g, '_');
+  const invitationsRef = ref(db, `invitations/${emailKey}`);
+  const snapshot = await get(invitationsRef);
+
+  if (snapshot.exists()) {
+    const invitations = snapshot.val();
+    const updates: any = {};
+
+    for (const engagementId in invitations) {
+      const invitation = invitations[engagementId];
+      
+      const engagementRef = ref(db, `engagements/${engagementId}`);
+      const engagementSnap = await get(engagementRef);
+      
+      if (engagementSnap.exists()) {
+        const engagementData = engagementSnap.val();
+        
+        updates[`/users/${user.uid}/engagements/${engagementId}`] = {
+          id: engagementId,
+          client: engagementData.client,
+          status: engagementData.status,
+          createdAt: engagementData.createdAt,
+          role: invitation.role
+        };
+
+        const basicsRef = ref(db, `engagements/${engagementId}/basics/teamMembers`);
+        const teamMembersSnapshot = await get(basicsRef);
+        if (teamMembersSnapshot.exists()) {
+          const teamMembers = teamMembersSnapshot.val();
+          if (Array.isArray(teamMembers)) {
+            teamMembers.forEach((member: TeamMember, index: number) => {
+              if (member.email?.toLowerCase() === userEmail) {
+                updates[`/engagements/${engagementId}/basics/teamMembers/${index}/status`] = 'active';
+              }
+            });
+          }
+        }
+      }
+    }
+
+    updates[`/invitations/${emailKey}`] = null;
+
+    if (Object.keys(updates).length > 0) {
+      await update(ref(db), updates);
+    }
+  }
+};
 // --- Section Data Management (SA 500, etc.) ---
 
+// These remain pointing to the global engagement ID, allowing for potential future collaboration features
 export const updateSectionData = (engagementId: string, section: string, data: any) => {
   const sectionRef = ref(db, `engagements/${engagementId}/${section}`);
   return update(sectionRef, data);
