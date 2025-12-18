@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { Client, AuditTabInfo, AuditReportDetails, TeamMember } from '../types';
 import ReportingAndConclusion from './ReportingAndConclusion';
@@ -15,6 +16,7 @@ import Basics from './Basics';
 import PlanningAndRiskAssessment from './PlanningAndRiskAssessment';
 import MaterialityAndSampling from './MaterialityAndSampling';
 import AuditEvidence from './AuditEvidence';
+import { setSectionData, subscribeToSection } from '../services/db';
 import { setSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
 
 interface AuditDashboardProps {
@@ -38,11 +40,11 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
   const [isSidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
 
-  // Sync team members from DB - FIXED: Changed subscription path
+  // Sync team members from DB
   useEffect(() => {
-    const unsubscribe = subscribeToSection(engagementId, 'basics', (data) => {
-      if (data && data.teamMembers) {
-        setTeamMembers(Array.isArray(data.teamMembers) ? data.teamMembers : []);
+    const unsubscribe = subscribeToSection(engagementId, 'basics/teamMembers', (data) => {
+      if (data) {
+        setTeamMembers(data);
       }
     });
     return () => unsubscribe();
@@ -58,16 +60,12 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
     }
     setTeamMembers(newMembers);
     
-    // Save to database under basics section
-    await setSectionData(engagementId, 'basics', { teamMembers: newMembers });
+    // Save to database
+    await setSectionData(engagementId, 'basics/teamMembers', newMembers);
     
     // Process invitations for members with 'invited' status
     if (client.ownerUserId) {
-      try {
-        await processTeamMemberInvitations(engagementId, newMembers, client.ownerUserId);
-      } catch (error) {
-        console.error('Error processing invitations:', error);
-      }
+      await processTeamMemberInvitations(engagementId, newMembers, client.ownerUserId);
     }
   };
 
