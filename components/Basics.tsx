@@ -1,6 +1,9 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { AuditTabProps } from '../types';
+import { updateSectionData, subscribeToSection } from '../services/db';
 import { updateSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
+
 
 const DraftModal: React.FC<{
   isOpen: boolean;
@@ -97,6 +100,7 @@ const DateInput: React.FC<{
   );
 };
 
+
 const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [], setTeamMembers }) => {
   const [data, setData] = useState({
     agmDate: '',
@@ -129,28 +133,17 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
   // Load data from Firebase
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'basics', (fetchedData) => {
-      try {
-        if (fetchedData) {
-          // Load team members if present and setTeamMembers is available
-          if (fetchedData.teamMembers && setTeamMembers) {
-            const members = Array.isArray(fetchedData.teamMembers) 
-              ? fetchedData.teamMembers 
-              : [];
-            setTeamMembers(members);
-          }
-          
-          // Exclude teamMembers from data state as it's handled separately
-          const { teamMembers: _, ...rest } = fetchedData;
-          setData(prev => ({ ...prev, ...rest }));
-        }
-      } catch (error) {
-        console.error('Error loading basics data:', error);
-      } finally {
-        setIsLoaded(true);
+      if (fetchedData) {
+        // We only merge existing fields to avoid overwriting with undefined if strictly enforcing types, 
+        // but here simple spread works nicely.
+        // Exclude teamMembers from here as it's handled by parent
+        const { teamMembers, ...rest } = fetchedData; 
+        setData(prev => ({ ...prev, ...rest }));
       }
+      setIsLoaded(true);
     });
     return () => unsubscribe();
-  }, [engagementId, setTeamMembers]);
+  }, [engagementId]);
 
   // Helper to update and save
   const updateData = (updates: Partial<typeof data>) => {
@@ -160,24 +153,25 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
       updateSectionData(engagementId, 'basics', updates);
     }
   };
-
   const validateEmail = (email: string): boolean => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
 
   // Specific update for nested objects
   const updateNested = (section: 'acceptanceChecks' | 'sa210Checks' | 'ethicsChecks', key: string) => {
     const newSection = {
-      ...data[section],
-      [key]: !data[section][key as keyof typeof data[typeof section]]
+        ...data[section],
+        [key]: !data[section][key as keyof typeof data[typeof section]]
     };
     updateData({ [section]: newSection });
   };
 
-  // Local state for UI inputs
+
+  // Local state for UI inputs that don't need immediate persistence until "Add"
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRole, setNewMemberRole] = useState('');
+
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [emailError, setEmailError] = useState('');
 
@@ -185,50 +179,40 @@ const Basics: React.FC<AuditTabProps> = ({ client, engagementId, teamMembers = [
   const [draftModalOpen, setDraftModalOpen] = useState(false);
   const [draftContent, setDraftContent] = useState('');
 
-  const addTeamMember = async () => {
-    if (newMemberName.trim() && newMemberRole.trim() && newMemberEmail.trim() && setTeamMembers) {
-      if (!validateEmail(newMemberEmail)) {
-        setEmailError('Please enter a valid email address');
-        return;
-      }
-      
-      // Check for duplicate emails
-      if (teamMembers.some(m => m.email?.toLowerCase() === newMemberEmail.toLowerCase())) {
-        setEmailError('This email is already in the team');
-        return;
-      }
-      
-      const newMember = {
-        id: Date.now().toString(),
-        name: newMemberName,
-        role: newMemberRole,
-        email: newMemberEmail.toLowerCase(),
-        status: 'invited' as const,
-        invitedAt: new Date().toISOString()
-      };
-      
-      const updatedMembers = [...teamMembers, newMember];
-      setTeamMembers(updatedMembers);
-      
-      // Save to Firebase and process invitations
-      await updateSectionData(engagementId, 'basics', { teamMembers: updatedMembers });
-      
-      if (client.ownerUserId) {
-        await processTeamMemberInvitations(engagementId, updatedMembers, client.ownerUserId);
-      }
-      
-      setNewMemberName('');
-      setNewMemberRole('');
-      setNewMemberEmail('');
-      setEmailError('');
+const addTeamMember = async () => {
+  if (newMemberName.trim() && newMemberRole.trim() && newMemberEmail.trim() && setTeamMembers) {
+    if (!validateEmail(newMemberEmail)) {
+      setEmailError('Please enter a valid email address');
+      return;
     }
-  };
+    
+    const newMember = {
+      id: Date.now().toString(),
+      name: newMemberName,
+      role: newMemberRole,
+      email: newMemberEmail.toLowerCase(),
+      status: 'invited' as const,
+      invitedAt: new Date().toISOString()
+    };
+    
+    const updatedMembers = [...teamMembers, newMember];
+    setTeamMembers(updatedMembers);
+    
+    // Process invitations immediately
+    if (client.ownerUserId) {
+      await processTeamMemberInvitations(engagementId, updatedMembers, client.ownerUserId);
+    }
+    
+    setNewMemberName('');
+    setNewMemberRole('');
+    setNewMemberEmail('');
+    setEmailError('');
+  }
+};
 
-  const removeTeamMember = async (id: string) => {
+  const removeTeamMember = (id: string) => {
     if (setTeamMembers) {
-      const updatedMembers = teamMembers.filter((m) => m.id !== id);
-      setTeamMembers(updatedMembers);
-      await updateSectionData(engagementId, 'basics', { teamMembers: updatedMembers });
+      setTeamMembers(teamMembers.filter((m) => m.id !== id));
     }
   };
 
@@ -400,7 +384,7 @@ Date: __________________
         </div>
       </div>
 
-      {/* Section 5: Audit Team */}
+            {/* Section 5: Audit Team */}
       <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-teal-500">
         <h3 className="text-xl font-bold text-slate-800 mb-4">5. Audit Team Structure</h3>
         <p className="text-sm text-slate-600 mb-4">Add team members with their email addresses. They will automatically get access when they sign in.</p>
@@ -494,7 +478,7 @@ Date: __________________
           <p className="mb-2 font-semibold">In conducting an audit of financial statements, our overall objectives are:</p>
           <ul className="list-disc list-inside space-y-1 pl-2">
             <li>To obtain reasonable assurance about whether the financial statements as a whole are free from material misstatement, whether due to fraud or error, thereby enabling the auditor to express an opinion on whether the financial statements are prepared, in all material respects, in accordance with an applicable financial reporting framework; and</li>
-            <li>To report on the financial statements, and communicate as required by the NSAs, in accordance with the auditor's findings.</li>
+            <li>To report on the financial statements, and communicate as required by the NSAs, in accordance with the auditor’s findings.</li>
           </ul>
         </div>
       </div>
