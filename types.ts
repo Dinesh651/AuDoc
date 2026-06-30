@@ -12,13 +12,13 @@ export interface Client {
 
 export interface AuditReportDetails {
   engagementPartnerName: string;
-  designation: string; // Replaces membershipNumber
+  designation: string;
   auditFirmName: string;
   reportDate: string; // YYYY-MM-DD format
   reportPlace: string;
   keyAuditMatters: string;
-  udin: string; // Added for UDIN
-  firmRegistrationNumber: string; // Added for firm registration
+  udin: string;
+  firmRegistrationNumber: string;
   includeOtherInformation?: boolean;
 }
 
@@ -26,9 +26,21 @@ export interface TeamMember {
   id: string;
   name: string;
   role: string;
-  email: string;  // ADD THIS
-  status?: 'invited' | 'active';  // ADD THIS
-  invitedAt?: string;  // ADD THIS
+  email: string;
+  status?: 'invited' | 'active';
+  invitedAt?: string;
+}
+
+export interface WorkingPaper {
+  id: string;
+  category: 'prev_year_financials' | 'current_year_financials' | 'other';
+  name: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+  uploadedAt: string;
+  description?: string;
 }
 
 export interface AuditTabProps {
@@ -38,6 +50,7 @@ export interface AuditTabProps {
   generatedReport?: string | null;
   teamMembers?: TeamMember[];
   setTeamMembers?: React.Dispatch<React.SetStateAction<TeamMember[]>>;
+  isClosed?: boolean;
 }
 
 export interface AuditTabInfo {

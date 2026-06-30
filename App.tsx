@@ -8,7 +8,6 @@ import ClientOnboardingForm from './components/ClientOnboardingForm';
 import AuditDashboard from './components/AuditDashboard';
 import LandingPage from './components/LandingPage';
 import UserDashboard from './components/UserDashboard';
-import { createEngagement, getUserEngagements, saveUserProfile } from './services/db';
 
 const App: React.FC = () => {
   // Auth State

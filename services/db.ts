@@ -1,7 +1,7 @@
 
 import { db } from '../firebase';
 import { ref, set, update, onValue, push, get, child } from 'firebase/database';
-import { Client } from '../types';
+import { Client, TeamMember, WorkingPaper } from '../types';
 import { User } from 'firebase/auth';
 
 // --- User Management ---
@@ -159,5 +159,72 @@ export const subscribeToSection = (engagementId: string, section: string, callba
     callback(data);
   });
   return unsubscribe;
+};
+
+// --- Engagement Close / Reopen ---
+
+export const closeEngagement = async (engagementId: string, ownerUserId: string): Promise<void> => {
+  const updates: any = {};
+  updates[`/engagements/${engagementId}/meta/isClosed`] = true;
+  updates[`/engagements/${engagementId}/meta/closedAt`] = new Date().toISOString();
+  updates[`/users/${ownerUserId}/engagements/${engagementId}/status`] = 'Closed';
+  await update(ref(db), updates);
+};
+
+export const reopenEngagement = async (engagementId: string, ownerUserId: string): Promise<void> => {
+  const updates: any = {};
+  updates[`/engagements/${engagementId}/meta/isClosed`] = false;
+  updates[`/engagements/${engagementId}/meta/closedAt`] = null;
+  updates[`/users/${ownerUserId}/engagements/${engagementId}/status`] = 'In Progress';
+  await update(ref(db), updates);
+};
+
+export const subscribeToEngagementMeta = (
+  engagementId: string,
+  callback: (meta: { isClosed: boolean; closedAt?: string | null }) => void
+) => {
+  const metaRef = ref(db, `engagements/${engagementId}/meta`);
+  return onValue(metaRef, (snapshot) => {
+    const data = snapshot.val();
+    callback({ isClosed: !!data?.isClosed, closedAt: data?.closedAt ?? null });
+  });
+};
+
+// --- Working Papers (metadata in Realtime DB, files in Firebase Storage) ---
+
+export const addWorkingPaperMeta = async (engagementId: string, paper: WorkingPaper): Promise<void> => {
+  const paperRef = ref(db, `engagements/${engagementId}/workingPapers/${paper.id}`);
+  await set(paperRef, paper);
+};
+
+export const deleteWorkingPaperMeta = async (engagementId: string, paperId: string): Promise<void> => {
+  const paperRef = ref(db, `engagements/${engagementId}/workingPapers/${paperId}`);
+  await set(paperRef, null);
+};
+
+export const subscribeToWorkingPapers = (
+  engagementId: string,
+  callback: (papers: WorkingPaper[]) => void
+) => {
+  const papersRef = ref(db, `engagements/${engagementId}/workingPapers`);
+  return onValue(papersRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.val();
+      const papers = (Object.values(data) as WorkingPaper[]).sort(
+        (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+      );
+      callback(papers);
+    } else {
+      callback([]);
+    }
+  });
+};
+
+// --- Full Engagement Data for Report Generation ---
+
+export const getFullEngagementData = async (engagementId: string): Promise<any> => {
+  const engRef = ref(db, `engagements/${engagementId}`);
+  const snapshot = await get(engRef);
+  return snapshot.exists() ? snapshot.val() : null;
 };
 

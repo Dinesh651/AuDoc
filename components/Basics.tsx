@@ -1,7 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { AuditTabProps } from '../types';
-import { updateSectionData, subscribeToSection } from '../services/db';
 import { updateSectionData, subscribeToSection, processTeamMemberInvitations } from '../services/db';
 
 
