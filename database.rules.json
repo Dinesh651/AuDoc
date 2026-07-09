@@ -1,0 +1,27 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+
+    "engagements": {
+      "$engagementId": {
+        ".read": "auth != null && (data.child('userId').val() === auth.uid || root.child('users').child(auth.uid).child('engagements').child($engagementId).exists() || (auth.token.email != null && root.child('invitations').child(auth.token.email.toLowerCase().replace('.', '_').replace('@', '_')).child($engagementId).exists()))",
+        ".write": "auth != null && (!data.exists() || data.child('userId').val() === auth.uid || root.child('users').child(auth.uid).child('engagements').child($engagementId).exists() || (auth.token.email != null && root.child('invitations').child(auth.token.email.toLowerCase().replace('.', '_').replace('@', '_')).child($engagementId).exists()))"
+      }
+    },
+
+    "invitations": {
+      "$emailKey": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    }
+  }
+}

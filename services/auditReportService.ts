@@ -1,6 +1,52 @@
-import { Client, AuditReportDetails } from '../types';
-import { AUDIT_REPORT_TEMPLATE } from '../constants';
+import { Client, AuditReportDetails, OpinionType } from '../types';
+import { AUDIT_REPORT_TEMPLATE, KEY_AUDIT_MATTERS_SECTION } from '../constants';
 import { formatDateToMonthDayYear } from '../utils/dateFormatter'; // Import the new utility
+
+// NSA 705 (Revised): wording for each opinion type
+const OPINION_WORDING: Record<OpinionType, {
+  title: string;
+  intro: string;
+  statement: string;
+  basisClosing: string;
+  includeKam: boolean;
+}> = {
+  Unmodified: {
+    title: 'Opinion',
+    intro: 'We have audited',
+    statement:
+      'In our opinion, the accompanying financial statements give a true and fair view, in all material respects, of the financial position of the Company as at [FY_PERIOD_END_OPINION], and of its financial performance and cash flows for the year then ended in accordance with [APPLICABLE_FRF].',
+    basisClosing:
+      'We believe that the audit evidence we have obtained is sufficient and appropriate to provide a basis for our opinion.',
+    includeKam: true,
+  },
+  Qualified: {
+    title: 'Qualified Opinion',
+    intro: 'We have audited',
+    statement:
+      'In our opinion, except for the effects of the matter(s) described in the Basis for Qualified Opinion section of our report, the accompanying financial statements give a true and fair view, in all material respects, of the financial position of the Company as at [FY_PERIOD_END_OPINION], and of its financial performance and cash flows for the year then ended in accordance with [APPLICABLE_FRF].',
+    basisClosing:
+      'We believe that the audit evidence we have obtained is sufficient and appropriate to provide a basis for our qualified opinion.',
+    includeKam: true,
+  },
+  Adverse: {
+    title: 'Adverse Opinion',
+    intro: 'We have audited',
+    statement:
+      'In our opinion, because of the significance of the matter(s) described in the Basis for Adverse Opinion section of our report, the accompanying financial statements do not give a true and fair view of the financial position of the Company as at [FY_PERIOD_END_OPINION], and of its financial performance and cash flows for the year then ended in accordance with [APPLICABLE_FRF].',
+    basisClosing:
+      'We believe that the audit evidence we have obtained is sufficient and appropriate to provide a basis for our adverse opinion.',
+    includeKam: true,
+  },
+  Disclaimer: {
+    title: 'Disclaimer of Opinion',
+    intro: 'We were engaged to audit',
+    statement:
+      'We do not express an opinion on the accompanying financial statements of the Company. Because of the significance of the matter(s) described in the Basis for Disclaimer of Opinion section of our report, we have not been able to obtain sufficient appropriate audit evidence to provide a basis for an audit opinion on these financial statements.',
+    basisClosing:
+      'However, because of the matter(s) described in the Basis for Disclaimer of Opinion section of our report, we were not able to obtain sufficient appropriate audit evidence to provide a basis for an audit opinion on these financial statements.',
+    includeKam: false, // NSA 701: KAM are not communicated when disclaiming an opinion
+  },
+};
 
 const createWordCompatibleHtml = (content: string, title: string) => `
 <html xmlns:o='urn:schemas-microsoft-com:office:office'
@@ -60,6 +106,42 @@ export const generateAuditReport = (
   // Format dates before replacement
   const formattedFyPeriodEnd = formatDateToMonthDayYear(client.fyPeriodEnd);
   const formattedReportDate = formatDateToMonthDayYear(reportDetails.reportDate);
+
+  // --- Opinion type (NSA 705) ---
+  const opinionType: OpinionType = reportDetails.opinionType || 'Unmodified';
+  const wording = OPINION_WORDING[opinionType];
+
+  report = report.replace(/\[OPINION_TITLE\]/g, wording.title);
+  report = report.replace(/\[OPINION_INTRO\]/g, wording.intro);
+  report = report.replace(/\[OPINION_STATEMENT\]/g, wording.statement);
+  report = report.replace(/\[BASIS_CLOSING\]/g, wording.basisClosing);
+
+  // Basis for modification paragraphs (the matter description) precede the standard basis text
+  const basisText = (reportDetails.basisForModification || '').trim();
+  const basisParagraphs = opinionType !== 'Unmodified' && basisText
+    ? basisText.split('\n').filter(l => l.trim()).map(line => `<p style="margin-bottom: 10px;">${line}</p>`).join('')
+    : '';
+  report = report.replace(/\[BASIS_FOR_MODIFICATION\]/g, basisParagraphs);
+
+  // --- Emphasis of Matter / Other Matter (NSA 706) ---
+  const eomText = (reportDetails.emphasisOfMatter || '').trim();
+  const omText = (reportDetails.otherMatter || '').trim();
+  let eomSection = '';
+  if (eomText) {
+    eomSection += `
+  <h4>Emphasis of Matter</h4>
+  ${eomText.split('\n').filter(l => l.trim()).map(line => `<p style="margin-bottom: 10px;">${line}</p>`).join('')}
+  <p style="margin-bottom: 20px;">Our opinion is not modified in respect of this matter.</p>`;
+  }
+  if (omText) {
+    eomSection += `
+  <h4>Other Matter</h4>
+  ${omText.split('\n').filter(l => l.trim()).map(line => `<p style="margin-bottom: 10px;">${line}</p>`).join('')}`;
+  }
+  report = report.replace(/\[EMPHASIS_OF_MATTER_SECTION\]/g, eomSection);
+
+  // --- Key Audit Matters (NSA 701) — omitted when disclaiming an opinion ---
+  report = report.replace(/\[KEY_AUDIT_MATTERS_SECTION\]/g, wording.includeKam ? KEY_AUDIT_MATTERS_SECTION : '');
 
   // Replace client-specific details
   report = report.replace(/\[CLIENT_NAME_HEADER\]/g, client.name);

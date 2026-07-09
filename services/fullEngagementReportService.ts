@@ -78,6 +78,23 @@ export const generateFullEngagementReport = (client: Client, engagementData: any
   const grossUncorrected = uncorrectedMs.reduce((s, m) => s + Math.abs(Number(m.amount) || 0), 0);
   const netUncorrected = uncorrectedMs.reduce((s, m) => s + (Number(m.amount) || 0), 0);
 
+  // Trial balance & lead schedules
+  const tbAccounts: any[] = engagementData?.trialBalance?.accounts ?? [];
+  const tbGroups = (() => {
+    const map = new Map<string, { count: number; current: number; prior: number }>();
+    tbAccounts.forEach((a) => {
+      const g = map.get(a.group || 'Unassigned') || { count: 0, current: 0, prior: 0 };
+      g.count += 1;
+      g.current += Number(a.current) || 0;
+      g.prior += Number(a.prior) || 0;
+      map.set(a.group || 'Unassigned', g);
+    });
+    return Array.from(map.entries())
+      .map(([group, totals]) => ({ group, ...totals }))
+      .sort((a, b) => Math.abs(b.current) - Math.abs(a.current));
+  })();
+  const tbNetCY = tbAccounts.reduce((s, a) => s + (Number(a.current) || 0), 0);
+
   const body = `
 <!-- COVER PAGE -->
 <div style="text-align:center;padding:50px 30px;border-bottom:3px solid #6366f1;margin-bottom:24px;page-break-after:always;">
@@ -326,9 +343,59 @@ ${
 }
 
 <!-- SECTION 4 -->
-${sec('Section 4: Audit Evidence', 'NSA 500–580')}
+${sec('Section 4: Trial Balance & Lead Schedules')}
+${
+  tbAccounts.length > 0
+    ? sub('4.1 Lead Schedules Summary', `
+  <p style="margin-bottom:8px;">${tbAccounts.length} accounts imported. Net current-year total: <strong>${currency(tbNetCY)}</strong>${Math.abs(tbNetCY) > 0.5 ? ' <span style="color:#d97706;font-weight:bold;">(OUT OF BALANCE)</span>' : ' (in balance)'}. ${pm > 0 ? `Balances at or above performance materiality (${currency(pm)}) are marked material.` : ''}</p>
+  <table style="width:100%;border-collapse:collapse;font-size:9.5pt;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Lead Schedule</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">Accounts</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Current Year</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Prior Year</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Variance</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">Assessment</th>
+    </tr></thead>
+    <tbody>
+      ${tbGroups
+        .map((g) => {
+          const isMaterial = pm > 0 && Math.abs(g.current) >= pm;
+          return `<tr>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;font-weight:bold;">${g.group}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">${g.count}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(g.current)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(g.prior)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(g.current - g.prior)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;font-weight:bold;color:${isMaterial ? '#dc2626' : '#94a3b8'};">${isMaterial ? 'Material' : pm > 0 ? 'Below PM' : '—'}</td>
+          </tr>`;
+        })
+        .join('')}
+    </tbody>
+  </table>`) + sub('4.2 Account Detail', `
+  <table style="width:100%;border-collapse:collapse;font-size:9pt;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="padding:6px 10px;border:1px solid #e2e8f0;text-align:left;">Account</th>
+      <th style="padding:6px 10px;border:1px solid #e2e8f0;text-align:left;">Lead Schedule</th>
+      <th style="padding:6px 10px;border:1px solid #e2e8f0;text-align:right;">Current Year</th>
+      <th style="padding:6px 10px;border:1px solid #e2e8f0;text-align:right;">Prior Year</th>
+    </tr></thead>
+    <tbody>
+      ${tbAccounts
+        .map(
+          (a) =>
+            `<tr><td style="padding:6px 10px;border:1px solid #e2e8f0;">${a.name ?? ''}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${a.group ?? ''}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(Number(a.current) || 0)}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(Number(a.prior) || 0)}</td></tr>`
+        )
+        .join('')}
+    </tbody>
+  </table>`)
+    : sub('4.1 Trial Balance', '<p style="color:#94a3b8;font-style:italic;">No trial balance recorded. Import one in the Trial Balance tab to populate this section.</p>')
+}
 
-${sub('4.1 NSA 500 — Evidence Procedures', `
+<!-- SECTION 5 -->
+${sec('Section 5: Audit Evidence', 'NSA 500–580')}
+
+${sub('5.1 NSA 500 — Evidence Procedures', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     ${checklistRows(ev?.sa500?.checklist ?? {}, {
       inspection: 'Inspection of records and documents',
@@ -343,7 +410,7 @@ ${sub('4.1 NSA 500 — Evidence Procedures', `
   ${ev?.sa500?.summary ? `<p style="margin-top:8px;"><strong>Summary:</strong> ${ev.sa500.summary}</p>` : ''}
 `)}
 
-${sub('4.2 NSA 501 — Specific Considerations', `
+${sub('5.2 NSA 501 — Specific Considerations', `
   <p style="font-weight:bold;margin-bottom:4px;">Inventory:</p>
   <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:10px;">
     <tr><td style="padding:6px 10px;border:1px solid #e2e8f0;width:80px;text-align:center;color:${ev?.sa501?.inventory?.attendedCount ? '#16a34a' : '#94a3b8'};">${checked(ev?.sa501?.inventory?.attendedCount)}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;">Attended physical inventory count</td></tr>
@@ -362,7 +429,7 @@ ${sub('4.2 NSA 501 — Specific Considerations', `
 
 ${
   confirmations.length > 0
-    ? sub('4.3 NSA 505 — External Confirmations', `
+    ? sub('5.3 NSA 505 — External Confirmations', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     <thead><tr style="background:#f1f5f9;">
       <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Party Name</th>
@@ -379,10 +446,10 @@ ${
         .join('')}
     </tbody>
   </table>`)
-    : sub('4.3 NSA 505 — External Confirmations', '<p style="color:#94a3b8;font-style:italic;">No confirmation requests recorded.</p>')
+    : sub('5.3 NSA 505 — External Confirmations', '<p style="color:#94a3b8;font-style:italic;">No confirmation requests recorded.</p>')
 }
 
-${sub('4.4 NSA 510 — Opening Balances', `
+${sub('5.4 NSA 510 — Opening Balances', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     ${checklistRows(ev?.sa510?.checklist ?? {}, {
       agreePriorPeriod: 'Prior period closing balances verified',
@@ -395,7 +462,7 @@ ${sub('4.4 NSA 510 — Opening Balances', `
 
 ${
   relatedParties.length > 0
-    ? sub('4.5 NSA 550 — Related Parties', `
+    ? sub('5.5 NSA 550 — Related Parties', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:10px;">
     <thead><tr style="background:#f1f5f9;">
       <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Party Name</th>
@@ -414,7 +481,7 @@ ${
     : ''
 }
 
-${sub('4.6 NSA 560 — Subsequent Events', `
+${sub('5.6 NSA 560 — Subsequent Events', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     ${checklistRows(ev?.sa560?.checklist ?? {}, {
       inquiryManagement: 'Management inquiry on subsequent events',
@@ -425,7 +492,7 @@ ${sub('4.6 NSA 560 — Subsequent Events', `
   ${ev?.sa560?.eventsNoted ? field('Events Noted', ev.sa560.eventsNoted) : ''}
 `)}
 
-${sub('4.7 NSA 570 — Going Concern', `
+${sub('5.7 NSA 570 — Going Concern', `
   <p style="font-weight:bold;margin-bottom:4px;">Indicators Identified:</p>
   <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:10px;">
     ${checklistRows(ev?.sa570?.indicators ?? {}, {
@@ -439,7 +506,7 @@ ${sub('4.7 NSA 570 — Going Concern', `
   ${ev?.sa570?.justification ? field('Justification', ev.sa570.justification) : ''}
 `)}
 
-${sub('4.8 NSA 580 — Written Representations', `
+${sub('5.8 NSA 580 — Written Representations', `
   ${field('Representation Letter Date', fmt(ev?.sa580?.letterDate))}
   <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-top:8px;">
     ${checklistRows(ev?.sa580?.checklist ?? {}, {
@@ -450,10 +517,10 @@ ${sub('4.8 NSA 580 — Written Representations', `
   </table>
 `)}
 
-<!-- SECTION 5 -->
-${sec('Section 5: Communications', 'NSA 260, 265')}
+<!-- SECTION 6 -->
+${sec('Section 6: Communications', 'NSA 260, 265')}
 
-${sub('5.1 NSA 260 — Communication with TCWG', `
+${sub('6.1 NSA 260 — Communication with TCWG', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     ${(comm?.sa260 ?? [])
       .map(
@@ -464,7 +531,7 @@ ${sub('5.1 NSA 260 — Communication with TCWG', `
   </table>
 `)}
 
-${sub('5.2 NSA 265 — Internal Control Deficiencies', `
+${sub('6.2 NSA 265 — Internal Control Deficiencies', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     ${(comm?.sa265 ?? [])
       .map(
@@ -475,13 +542,16 @@ ${sub('5.2 NSA 265 — Internal Control Deficiencies', `
   </table>
 `)}
 
-<!-- SECTION 6 -->
-${sec('Section 6: Reporting Details', 'NSA 700')}
+<!-- SECTION 7 -->
+${sec('Section 7: Reporting Details', 'NSA 700')}
 
 ${
   rep?.engagementPartnerName
-    ? sub('6.1 Report Particulars', `
+    ? sub('7.1 Report Particulars', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
+    <tr><td style="padding:6px 10px;border:1px solid #e2e8f0;width:40%;background:#f8fafc;"><strong>Opinion Type (NSA 705)</strong></td><td style="padding:6px 10px;border:1px solid #e2e8f0;font-weight:bold;color:${
+      rep.opinionType === 'Adverse' || rep.opinionType === 'Disclaimer' ? '#dc2626' : rep.opinionType === 'Qualified' ? '#d97706' : '#16a34a'
+    };">${rep.opinionType ?? 'Unmodified'}</td></tr>
     <tr><td style="padding:6px 10px;border:1px solid #e2e8f0;width:40%;background:#f8fafc;"><strong>Engagement Partner</strong></td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${rep.engagementPartnerName}</td></tr>
     <tr><td style="padding:6px 10px;border:1px solid #e2e8f0;background:#f8fafc;"><strong>Designation</strong></td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${rep.designation ?? '—'}</td></tr>
     <tr><td style="padding:6px 10px;border:1px solid #e2e8f0;background:#f8fafc;"><strong>Audit Firm</strong></td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${rep.auditFirmName ?? '—'}</td></tr>
@@ -490,15 +560,18 @@ ${
     <tr><td style="padding:6px 10px;border:1px solid #e2e8f0;background:#f8fafc;"><strong>UDIN</strong></td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${rep.udin ?? '—'}</td></tr>
     <tr><td style="padding:6px 10px;border:1px solid #e2e8f0;background:#f8fafc;"><strong>Firm Registration No.</strong></td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${rep.firmRegistrationNumber ?? '—'}</td></tr>
   </table>
+  ${rep.basisForModification?.trim() ? `<p style="margin-top:10px;"><strong>Basis for ${rep.opinionType === 'Disclaimer' ? 'Disclaimer of Opinion' : `${rep.opinionType ?? 'Modified'} Opinion`}:</strong><br/><span style="white-space:pre-wrap;">${rep.basisForModification}</span></p>` : ''}
+  ${rep.emphasisOfMatter?.trim() ? `<p style="margin-top:10px;"><strong>Emphasis of Matter (NSA 706):</strong><br/><span style="white-space:pre-wrap;">${rep.emphasisOfMatter}</span></p>` : ''}
+  ${rep.otherMatter?.trim() ? `<p style="margin-top:10px;"><strong>Other Matter (NSA 706):</strong><br/><span style="white-space:pre-wrap;">${rep.otherMatter}</span></p>` : ''}
   ${rep.keyAuditMatters?.trim() ? `<p style="margin-top:10px;"><strong>Key Audit Matters:</strong><br/><span style="white-space:pre-wrap;">${rep.keyAuditMatters}</span></p>` : ''}
 `)
-    : sub('6.1 Report Particulars', '<p style="color:#94a3b8;font-style:italic;">Report details not yet recorded. Complete the Reporting &amp; Conclusion tab to populate this section.</p>')
+    : sub('7.1 Report Particulars', '<p style="color:#94a3b8;font-style:italic;">Report details not yet recorded. Complete the Reporting &amp; Conclusion tab to populate this section.</p>')
 }
 
 ${
   wps.length > 0
-    ? `${sec('Section 7: Working Papers Index')}
-${sub('7.1 Document Register', `
+    ? `${sec('Section 8: Working Papers Index')}
+${sub('8.1 Document Register', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     <thead><tr style="background:#f1f5f9;">
       <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Category</th>
@@ -526,8 +599,8 @@ ${sub('7.1 Document Register', `
 }
 
 <!-- SECTION 8: SIGN-OFF REGISTER -->
-${sec('Section 8: Documentation Sign-off Register', 'NSA 230')}
-${sub('8.1 Preparation & Review Sign-offs', `
+${sec('Section 9: Documentation Sign-off Register', 'NSA 230')}
+${sub('9.1 Preparation & Review Sign-offs', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     <thead><tr style="background:#f1f5f9;">
       <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Section</th>
@@ -541,6 +614,7 @@ ${sub('8.1 Preparation & Review Sign-offs', `
         ['basics', 'Basics & Engagement Setup'],
         ['romm', 'Planning and Risk Assessment'],
         ['materiality', 'Materiality & Sampling'],
+        ['trialBalance', 'Trial Balance & Lead Schedules'],
         ['auditEvidence', 'Audit Evidence'],
         ['communication', 'Communication'],
         ['reporting', 'Reporting & Conclusion'],

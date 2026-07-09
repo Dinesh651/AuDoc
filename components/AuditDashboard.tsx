@@ -20,6 +20,8 @@ import PlanningAndRiskAssessment from './PlanningAndRiskAssessment';
 import MaterialityAndSampling from './MaterialityAndSampling';
 import AuditEvidence from './AuditEvidence';
 import WorkingPapers from './WorkingPapers';
+import TrialBalance from './TrialBalance';
+import TableIcon from './icons/TableIcon';
 import {
   setSectionData,
   subscribeToSection,
@@ -42,6 +44,7 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
     { id: 'basics', title: 'Basics', icon: FileTextIcon, component: Basics },
     { id: 'romm', title: 'Planning and Risk Assessment', icon: ChecklistIcon, component: PlanningAndRiskAssessment },
     { id: 'materiality', title: 'Materiality & Sampling', icon: CalculatorIcon, component: MaterialityAndSampling },
+    { id: 'trialBalance', title: 'Trial Balance', icon: TableIcon, component: TrialBalance },
     { id: 'auditEvidence', title: 'Audit Evidence', icon: ClipboardIcon, component: AuditEvidence },
     { id: 'communication', title: 'Communication', icon: ChatIcon, component: Communication },
     { id: 'reporting', title: 'Reporting & Conclusion', icon: DocumentIcon, component: ReportingAndConclusion },

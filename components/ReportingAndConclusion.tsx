@@ -1,7 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
-import { AuditReportDetails, AuditTabProps } from '../types';
+import { AuditReportDetails, AuditTabProps, OpinionType } from '../types';
 import { updateSectionData, subscribeToSection } from '../services/db';
+
+const OPINION_META: Record<OpinionType, { label: string; hint: string; color: string }> = {
+  Unmodified: { label: 'Unmodified (Clean)', hint: 'Financial statements give a true and fair view.', color: 'border-green-300 bg-green-50 text-green-800' },
+  Qualified: { label: 'Qualified — "Except for"', hint: 'Material but not pervasive misstatement, or inability to obtain evidence (NSA 705).', color: 'border-amber-300 bg-amber-50 text-amber-800' },
+  Adverse: { label: 'Adverse', hint: 'Misstatements are both material and pervasive (NSA 705).', color: 'border-red-300 bg-red-50 text-red-800' },
+  Disclaimer: { label: 'Disclaimer of Opinion', hint: 'Unable to obtain sufficient evidence; possible effects material and pervasive (NSA 705). KAM section is omitted.', color: 'border-slate-400 bg-slate-100 text-slate-800' },
+};
+
+const npr = (n: number) => `NPR ${(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
 // Define props for the InputField for type safety
 interface InputFieldProps {
@@ -45,11 +54,18 @@ const ReportForm: React.FC<{
     keyAuditMatters: '',
     udin: '',
     firmRegistrationNumber: '',
-    includeOtherInformation: true
+    includeOtherInformation: true,
+    opinionType: 'Unmodified' as OpinionType,
+    basisForModification: '',
+    emphasisOfMatter: '',
+    otherMatter: '',
   });
-  
+
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [isLoaded, setIsLoaded] = useState(false);
+
+  // NSA 450 cross-check: uncorrected misstatements vs materiality
+  const [misstatementCheck, setMisstatementCheck] = useState<{ gross: number; om: number } | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'reporting', (fetchedData) => {
@@ -57,6 +73,18 @@ const ReportForm: React.FC<{
             setData(prev => ({ ...prev, ...fetchedData }));
         }
         setIsLoaded(true);
+    });
+    return () => unsubscribe();
+  }, [engagementId]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSection(engagementId, 'materiality', (mat) => {
+      if (!mat) { setMisstatementCheck(null); return; }
+      const om = ((Number(mat.benchmarkAmount) || 0) * (Number(mat.overallPercent) || 0)) / 100;
+      const gross = ((mat.misstatements || []) as any[])
+        .filter((m) => m.status !== 'Corrected')
+        .reduce((s, m) => s + Math.abs(Number(m.amount) || 0), 0);
+      setMisstatementCheck({ gross, om });
     });
     return () => unsubscribe();
   }, [engagementId]);
@@ -80,6 +108,9 @@ const ReportForm: React.FC<{
     if (!data.reportPlace.trim()) newErrors.reportPlace = 'Report Place is required.';
     if (!data.udin.trim()) newErrors.udin = 'UDIN is required.';
     if (!data.firmRegistrationNumber.trim()) newErrors.firmRegistrationNumber = 'Firm Registration Number is required.';
+    if (data.opinionType !== 'Unmodified' && !data.basisForModification.trim()) {
+      newErrors.basisForModification = `Describe the matter giving rise to the ${data.opinionType.toLowerCase()} opinion (NSA 705).`;
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -93,10 +124,67 @@ const ReportForm: React.FC<{
     }
   };
 
+  const opinionMeta = OPINION_META[data.opinionType] || OPINION_META.Unmodified;
+  const misstatementsExceedOM = !!misstatementCheck && misstatementCheck.om > 0 && misstatementCheck.gross > misstatementCheck.om;
+
   return (
     <div className="bg-white p-8 rounded-lg shadow-sm">
-      <h3 className="text-2xl font-bold text-slate-800 mb-6 border-b pb-4">Generate Unmodified Audit Opinion</h3>
+      <h3 className="text-2xl font-bold text-slate-800 mb-6 border-b pb-4">Independent Auditor&rsquo;s Report (NSA 700 / 705 / 706)</h3>
       <div className="space-y-6">
+
+        {/* NSA 450 advisory */}
+        {misstatementsExceedOM && data.opinionType === 'Unmodified' && (
+          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <div>
+              <p className="text-sm font-semibold text-red-800">Uncorrected misstatements exceed overall materiality</p>
+              <p className="text-xs text-red-600 mt-0.5">
+                Per your NSA 450 evaluation, aggregate uncorrected misstatements ({npr(misstatementCheck!.gross)}) exceed overall materiality ({npr(misstatementCheck!.om)}).
+                An unmodified opinion may be inappropriate — consider a qualified or adverse opinion (NSA 705), or request management to correct the misstatements.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Opinion Type (NSA 705) */}
+        <div>
+          <label className="block text-sm font-medium text-slate-600 mb-2">Opinion Type (NSA 705)</label>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {(Object.keys(OPINION_META) as OpinionType[]).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => updateData({ opinionType: type })}
+                className={`p-3 rounded-lg border-2 text-left transition-all ${
+                  data.opinionType === type
+                    ? OPINION_META[type].color + ' ring-2 ring-offset-1 ring-indigo-300'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                }`}
+              >
+                <p className="text-sm font-bold">{OPINION_META[type].label}</p>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">{opinionMeta.hint}</p>
+        </div>
+
+        {data.opinionType !== 'Unmodified' && (
+          <div>
+            <label htmlFor="basisForModification" className="block text-sm font-medium text-slate-600 mb-1">
+              Basis for {data.opinionType === 'Disclaimer' ? 'Disclaimer of Opinion' : `${data.opinionType} Opinion`} — describe the matter(s) <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id="basisForModification"
+              value={data.basisForModification}
+              onChange={(e) => updateData({ basisForModification: e.target.value })}
+              rows={4}
+              className={`w-full p-2.5 bg-slate-50 border rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y ${errors.basisForModification ? 'border-red-500' : 'border-slate-300'}`}
+              placeholder="e.g., The Company has not recognised a provision for gratuity amounting to NPR X as required by NAS 19, resulting in an overstatement of profit..."
+            />
+            {errors.basisForModification && <p className="text-red-500 text-xs mt-1">{errors.basisForModification}</p>}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <InputField id="engagementPartnerName" label="Engagement Partner Name" value={data.engagementPartnerName} onChange={(e) => updateData({ engagementPartnerName: e.target.value })} placeholder="e.g., John Doe" error={errors.engagementPartnerName}/>
             <InputField id="designation" label="Designation" value={data.designation} onChange={(e) => updateData({ designation: e.target.value })} placeholder="e.g., Partner" error={errors.designation}/>
@@ -106,13 +194,34 @@ const ReportForm: React.FC<{
             <InputField id="udin" label="UDIN" value={data.udin} onChange={(e) => updateData({ udin: e.target.value })} placeholder="e.g., 21012345ABCDEF1234" error={errors.udin}/>
             <InputField id="firmRegistrationNumber" label="Firm Registration Number" value={data.firmRegistrationNumber} onChange={(e) => updateData({ firmRegistrationNumber: e.target.value })} placeholder="e.g., 123-060/61" error={errors.firmRegistrationNumber}/>
         </div>
-        <div>
-          <label htmlFor="keyAuditMatters" className="block text-sm font-medium text-slate-600 mb-1">
-            Key Audit Matters (Optional)
-          </label>
-          <textarea id="keyAuditMatters" value={data.keyAuditMatters} onChange={(e) => updateData({ keyAuditMatters: e.target.value })} rows={5} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y" placeholder="Enter one matter per line, or leave blank for the default statement."/>
+        {data.opinionType !== 'Disclaimer' ? (
+          <div>
+            <label htmlFor="keyAuditMatters" className="block text-sm font-medium text-slate-600 mb-1">
+              Key Audit Matters (Optional)
+            </label>
+            <textarea id="keyAuditMatters" value={data.keyAuditMatters} onChange={(e) => updateData({ keyAuditMatters: e.target.value })} rows={5} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y" placeholder="Enter one matter per line, or leave blank for the default statement."/>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-md border border-slate-200">
+            Key Audit Matters are not communicated when disclaiming an opinion (NSA 701) — the section will be omitted from the report.
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label htmlFor="emphasisOfMatter" className="block text-sm font-medium text-slate-600 mb-1">
+              Emphasis of Matter (Optional, NSA 706)
+            </label>
+            <textarea id="emphasisOfMatter" value={data.emphasisOfMatter} onChange={(e) => updateData({ emphasisOfMatter: e.target.value })} rows={3} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y" placeholder='e.g., We draw attention to Note X to the financial statements which describes... ("Our opinion is not modified..." is appended automatically.)'/>
+          </div>
+          <div>
+            <label htmlFor="otherMatter" className="block text-sm font-medium text-slate-600 mb-1">
+              Other Matter (Optional, NSA 706)
+            </label>
+            <textarea id="otherMatter" value={data.otherMatter} onChange={(e) => updateData({ otherMatter: e.target.value })} rows={3} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y" placeholder="e.g., The financial statements for the year ended ... were audited by another auditor who expressed an unmodified opinion..."/>
+          </div>
         </div>
-        
+
         {!client.isListed && (
           <div className="flex items-center bg-slate-50 p-3 rounded-md border border-slate-200">
             <input

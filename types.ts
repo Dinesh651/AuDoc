@@ -10,6 +10,8 @@ export interface Client {
   ownerUserId?: string;
 }
 
+export type OpinionType = 'Unmodified' | 'Qualified' | 'Adverse' | 'Disclaimer';
+
 export interface AuditReportDetails {
   engagementPartnerName: string;
   designation: string;
@@ -20,6 +22,10 @@ export interface AuditReportDetails {
   udin: string;
   firmRegistrationNumber: string;
   includeOtherInformation?: boolean;
+  opinionType?: OpinionType;
+  basisForModification?: string; // required for Qualified / Adverse / Disclaimer (NSA 705)
+  emphasisOfMatter?: string; // optional (NSA 706)
+  otherMatter?: string; // optional (NSA 706)
 }
 
 export interface TeamMember {
