@@ -76,6 +76,20 @@ interface SamplingPlan {
   assignedTo?: string;
 }
 
+interface Misstatement {
+  id: string;
+  description: string;
+  account: string;
+  type: 'Factual' | 'Judgmental' | 'Projected';
+  amount: number; // signed: positive = overstatement, negative = understatement
+  status: 'Uncorrected' | 'Corrected';
+}
+
+const npr = (n: number) => `NPR ${(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
+// MUS-style assurance factors (approx. 5% risk of incorrect acceptance)
+const ASSURANCE_FACTORS: Record<string, number> = { High: 3.0, Moderate: 2.3, Low: 1.9 };
+
 const AssignModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
@@ -124,7 +138,9 @@ const MaterialityAndSampling: React.FC<AuditTabProps> = ({ client, engagementId,
     overallPercent: 5,
     performancePercent: 75,
     justification: '',
-    samplingPlans: [] as SamplingPlan[]
+    samplingPlans: [] as SamplingPlan[],
+    misstatements: [] as Misstatement[],
+    sampleCalc: { population: 0, tolerable: 0, expected: 0, risk: 'Moderate' },
   });
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -134,9 +150,11 @@ const MaterialityAndSampling: React.FC<AuditTabProps> = ({ client, engagementId,
         if (fetchedData) {
             setData(prev => ({
                  ...prev,
-                 ...fetchedData, 
-                 // Ensure array exists if undefined in DB
-                 samplingPlans: fetchedData.samplingPlans || []
+                 ...fetchedData,
+                 // Ensure arrays/objects exist if undefined in DB
+                 samplingPlans: fetchedData.samplingPlans || [],
+                 misstatements: fetchedData.misstatements || [],
+                 sampleCalc: { ...prev.sampleCalc, ...(fetchedData.sampleCalc || {}) },
             }));
         }
         setIsLoaded(true);
@@ -196,6 +214,46 @@ const MaterialityAndSampling: React.FC<AuditTabProps> = ({ client, engagementId,
     const newPlans = data.samplingPlans.filter(p => p.id !== id);
     updateData({ samplingPlans: newPlans });
   };
+
+  // --- NSA 450: Misstatements ---
+  const emptyMisstatement: Omit<Misstatement, 'id'> = {
+    description: '', account: '', type: 'Factual', amount: 0, status: 'Uncorrected',
+  };
+  const [newMisstatement, setNewMisstatement] = useState<Omit<Misstatement, 'id'>>(emptyMisstatement);
+
+  const addMisstatement = () => {
+    if (!newMisstatement.description.trim() || !newMisstatement.amount) return;
+    updateData({ misstatements: [...data.misstatements, { ...newMisstatement, id: Date.now().toString() }] });
+    setNewMisstatement(emptyMisstatement);
+  };
+
+  const removeMisstatement = (id: string) => {
+    updateData({ misstatements: data.misstatements.filter(m => m.id !== id) });
+  };
+
+  const toggleMisstatementStatus = (id: string) => {
+    updateData({
+      misstatements: data.misstatements.map(m =>
+        m.id === id ? { ...m, status: m.status === 'Corrected' ? 'Uncorrected' : 'Corrected' } : m
+      ),
+    });
+  };
+
+  const uncorrected = data.misstatements.filter(m => m.status === 'Uncorrected');
+  const netUncorrected = uncorrected.reduce((sum, m) => sum + (m.amount || 0), 0);
+  const grossUncorrected = uncorrected.reduce((sum, m) => sum + Math.abs(m.amount || 0), 0);
+
+  // --- NSA 530: Sample size calculator ---
+  const updateSampleCalc = (updates: Partial<typeof data.sampleCalc>) => {
+    updateData({ sampleCalc: { ...data.sampleCalc, ...updates } });
+  };
+  const calcTolerable = data.sampleCalc.tolerable || performanceMateriality;
+  const calcFactor = ASSURANCE_FACTORS[data.sampleCalc.risk] || 2.3;
+  const calcDenominator = calcTolerable - (data.sampleCalc.expected || 0);
+  const suggestedSampleSize = data.sampleCalc.population > 0 && calcDenominator > 0
+    ? Math.ceil((data.sampleCalc.population * calcFactor) / calcDenominator)
+    : 0;
+  const samplingInterval = suggestedSampleSize > 0 ? data.sampleCalc.population / suggestedSampleSize : 0;
   
   const openAssignModal = (id: string) => {
     setCurrentPlanIdToAssign(id);
@@ -261,8 +319,8 @@ const MaterialityAndSampling: React.FC<AuditTabProps> = ({ client, engagementId,
                 <label className="block text-sm font-medium text-slate-700 mb-1">Overall %</label>
                 <input 
                   type="number" 
-                  value={data.overallPercent} 
-                  onChange={(e) => updateData({ overallPercent: parseFloat(e.target.value) })}
+                  value={data.overallPercent}
+                  onChange={(e) => updateData({ overallPercent: parseFloat(e.target.value) || 0 })}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-indigo-500"
                 />
                 <p className="text-xs text-slate-500 mt-1">Standard: 3-7% of PBT, 0.5-1% of Revenue</p>
@@ -271,8 +329,8 @@ const MaterialityAndSampling: React.FC<AuditTabProps> = ({ client, engagementId,
                 <label className="block text-sm font-medium text-slate-700 mb-1">Performance %</label>
                 <input 
                   type="number" 
-                  value={data.performancePercent} 
-                  onChange={(e) => updateData({ performancePercent: parseFloat(e.target.value) })}
+                  value={data.performancePercent}
+                  onChange={(e) => updateData({ performancePercent: parseFloat(e.target.value) || 0 })}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:ring-indigo-500"
                 />
                 <p className="text-xs text-slate-500 mt-1">Standard: 60-85% of OM</p>
@@ -321,7 +379,72 @@ const MaterialityAndSampling: React.FC<AuditTabProps> = ({ client, engagementId,
       {/* NSA 530: Audit Sampling */}
       <div className="bg-white p-8 rounded-lg shadow-sm">
         <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-4">NSA 530: Audit Sampling</h3>
-        
+
+        {/* Sample Size Calculator */}
+        <div className="bg-emerald-50 p-5 rounded-md border border-emerald-100 mb-6">
+          <h4 className="text-sm font-bold text-emerald-800 uppercase mb-1">Sample Size Calculator (Monetary Unit Sampling)</h4>
+          <p className="text-xs text-emerald-700 mb-4">Sample size = Population Value &times; Assurance Factor &divide; (Tolerable &minus; Expected Misstatement)</p>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Population Value (NPR)</label>
+              <input
+                type="number"
+                value={data.sampleCalc.population || ''}
+                onChange={(e) => updateSampleCalc({ population: parseFloat(e.target.value) || 0 })}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500"
+                placeholder="e.g., 50000000"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Tolerable Misstatement</label>
+              <input
+                type="number"
+                value={data.sampleCalc.tolerable || ''}
+                onChange={(e) => updateSampleCalc({ tolerable: parseFloat(e.target.value) || 0 })}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500"
+                placeholder={performanceMateriality ? `Default: PM ${npr(performanceMateriality)}` : 'Set materiality above'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Expected Misstatement</label>
+              <input
+                type="number"
+                value={data.sampleCalc.expected || ''}
+                onChange={(e) => updateSampleCalc({ expected: parseFloat(e.target.value) || 0 })}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500"
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Assessed ROMM</label>
+              <select
+                value={data.sampleCalc.risk}
+                onChange={(e) => updateSampleCalc({ risk: e.target.value })}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="Low">Low (factor 1.9)</option>
+                <option value="Moderate">Moderate (factor 2.3)</option>
+                <option value="High">High (factor 3.0)</option>
+              </select>
+            </div>
+          </div>
+          {suggestedSampleSize > 0 ? (
+            <div className="flex flex-wrap items-center gap-6 bg-white p-3 rounded-md border border-emerald-200">
+              <div>
+                <p className="text-xs text-slate-500 uppercase font-semibold">Suggested Sample Size</p>
+                <p className="text-2xl font-bold text-emerald-700">{suggestedSampleSize.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase font-semibold">Sampling Interval</p>
+                <p className="text-lg font-bold text-slate-700">{npr(samplingInterval)}</p>
+              </div>
+              <p className="text-xs text-slate-400 max-w-xs ml-auto">Indicative only — apply professional judgment and document the basis for the final sample size below.</p>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 italic">Enter a population value (and materiality above) to compute a suggested sample size.</p>
+          )}
+        </div>
+
         <div className="bg-slate-50 p-5 rounded-md border border-slate-200 mb-6">
           <h4 className="text-sm font-bold text-slate-700 uppercase mb-4">Design New Sample</h4>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -420,8 +543,165 @@ const MaterialityAndSampling: React.FC<AuditTabProps> = ({ client, engagementId,
           </div>
         )}
       </div>
-      
-      <AssignModal 
+
+      {/* NSA 450: Evaluation of Misstatements */}
+      <div className="bg-white p-8 rounded-lg shadow-sm">
+        <h3 className="text-xl font-bold text-slate-800 mb-1 border-b pb-4">NSA 450: Evaluation of Misstatements Identified During the Audit</h3>
+        <p className="text-sm text-slate-500 mt-3 mb-6">
+          Accumulate misstatements identified during the audit (other than those clearly trivial, i.e. below {npr(trivialAmount)}) and evaluate their effect against materiality before forming the opinion.
+        </p>
+
+        {/* Add misstatement form */}
+        <div className="bg-slate-50 p-5 rounded-md border border-slate-200 mb-6">
+          <h4 className="text-sm font-bold text-slate-700 uppercase mb-3">Log Misstatement</h4>
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-4">
+              <input
+                type="text"
+                placeholder="Description (e.g., Unrecorded accrual for utilities)"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newMisstatement.description}
+                onChange={(e) => setNewMisstatement({ ...newMisstatement, description: e.target.value })}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <input
+                type="text"
+                placeholder="Account"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newMisstatement.account}
+                onChange={(e) => setNewMisstatement({ ...newMisstatement, account: e.target.value })}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <select
+                value={newMisstatement.type}
+                onChange={(e) => setNewMisstatement({ ...newMisstatement, type: e.target.value as Misstatement['type'] })}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+              >
+                <option>Factual</option>
+                <option>Judgmental</option>
+                <option>Projected</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs text-slate-400 block mb-1">Amount (&minus; = understatement)</label>
+              <input
+                type="number"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newMisstatement.amount || ''}
+                onChange={(e) => setNewMisstatement({ ...newMisstatement, amount: parseFloat(e.target.value) || 0 })}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <button
+                onClick={addMisstatement}
+                disabled={!newMisstatement.description.trim() || !newMisstatement.amount}
+                className="w-full px-4 py-2.5 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {data.misstatements.length > 0 ? (
+          <>
+            <div className="overflow-x-auto border rounded-md mb-6">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Description</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Account</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Type</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Amount</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-slate-200">
+                  {data.misstatements.map((m) => {
+                    const isTrivial = Math.abs(m.amount) < trivialAmount && trivialAmount > 0;
+                    return (
+                      <tr key={m.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-sm text-slate-800">
+                          {m.description}
+                          {isTrivial && <span className="ml-2 px-2 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-full uppercase" title="Below the clearly trivial threshold">Trivial</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-500">{m.account}</td>
+                        <td className="px-4 py-3 text-sm text-slate-500">{m.type}</td>
+                        <td className={`px-4 py-3 text-sm text-right font-semibold ${m.amount < 0 ? 'text-red-600' : 'text-slate-700'}`}>{npr(m.amount)}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => toggleMisstatementStatus(m.id)}
+                            className={`px-2.5 py-0.5 rounded-full text-xs font-bold transition-colors ${
+                              m.status === 'Corrected'
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                            }`}
+                            title="Click to toggle corrected / uncorrected"
+                          >
+                            {m.status}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button onClick={() => removeMisstatement(m.id)} className="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Evaluation Summary */}
+            <div className={`p-5 rounded-lg border ${
+              grossUncorrected > overallMateriality && overallMateriality > 0 ? 'bg-red-50 border-red-200' :
+              grossUncorrected > performanceMateriality && performanceMateriality > 0 ? 'bg-amber-50 border-amber-200' :
+              'bg-green-50 border-green-200'
+            }`}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-slate-500">Uncorrected — Gross (Absolute)</p>
+                  <p className="text-xl font-bold text-slate-800">{npr(grossUncorrected)}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase text-slate-500">Uncorrected — Net</p>
+                  <p className="text-xl font-bold text-slate-800">{npr(netUncorrected)}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase text-slate-500">Overall / Performance Materiality</p>
+                  <p className="text-sm font-bold text-slate-700 mt-1.5">{npr(overallMateriality)} / {npr(performanceMateriality)}</p>
+                </div>
+              </div>
+              {overallMateriality > 0 ? (
+                grossUncorrected > overallMateriality ? (
+                  <p className="text-sm font-semibold text-red-700">
+                    ⚠ Aggregate uncorrected misstatements EXCEED overall materiality. The financial statements may be materially misstated — request management to correct, and consider the impact on the audit opinion (NSA 705).
+                  </p>
+                ) : grossUncorrected > performanceMateriality ? (
+                  <p className="text-sm font-semibold text-amber-700">
+                    ⚠ Aggregate uncorrected misstatements exceed performance materiality. Reassess whether the audit strategy and remaining buffer are adequate; consider requesting corrections and performing further procedures.
+                  </p>
+                ) : (
+                  <p className="text-sm font-semibold text-green-700">
+                    ✓ Aggregate uncorrected misstatements are below performance materiality. The financial statements are not materially misstated by identified errors, individually or in aggregate.
+                  </p>
+                )
+              ) : (
+                <p className="text-sm text-slate-500 italic">Set the materiality benchmark above to evaluate misstatements automatically.</p>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8 bg-slate-50 rounded-md border border-dashed border-slate-300">
+            <p className="text-slate-500">No misstatements logged yet.</p>
+            <p className="text-xs text-slate-400 mt-1">Record differences identified during fieldwork here — they will be evaluated against materiality automatically.</p>
+          </div>
+        )}
+      </div>
+
+      <AssignModal
         isOpen={isAssignModalOpen}
         onClose={() => setIsAssignModalOpen(false)}
         teamMembers={teamMembers}

@@ -59,6 +59,24 @@ export const generateFullEngagementReport = (client: Client, engagementData: any
   const confirmations: any[] = ev?.sa505?.requests ?? [];
   const relatedParties: any[] = ev?.sa550?.parties ?? [];
   const samplingPlans: any[] = mat?.samplingPlans ?? [];
+  const riskRegister: any[] = planning?.riskRegister ?? [];
+  const analyticalRows: any[] = planning?.analyticalRows ?? [];
+  const analyticalThreshold = Number(planning?.analyticalThreshold) || 10;
+  const misstatements: any[] = mat?.misstatements ?? [];
+  const signoffs: Record<string, any> = engagementData?.signoffs ?? {};
+
+  const riskScore: Record<string, number> = { Low: 1, Moderate: 2, High: 3 };
+  const combinedRomm = (r: any): string => {
+    if (r?.fraudRisk || r?.significantRisk) return 'High';
+    const product = (riskScore[r?.inherent] || 2) * (riskScore[r?.control] || 2);
+    return product >= 6 ? 'High' : product >= 3 ? 'Moderate' : 'Low';
+  };
+  const riskColor = (level: string) =>
+    level === 'High' ? '#dc2626' : level === 'Moderate' ? '#d97706' : '#16a34a';
+
+  const uncorrectedMs = misstatements.filter((m) => m.status !== 'Corrected');
+  const grossUncorrected = uncorrectedMs.reduce((s, m) => s + Math.abs(Number(m.amount) || 0), 0);
+  const netUncorrected = uncorrectedMs.reduce((s, m) => s + (Number(m.amount) || 0), 0);
 
   const body = `
 <!-- COVER PAGE -->
@@ -162,6 +180,75 @@ ${sub('2.3 Risk Assessment Procedures', `
 
 ${sub('2.4 Understanding of Internal Controls', textBox(planning?.internalControl))}
 
+${
+  riskRegister.length > 0
+    ? sub('2.5 Risk Register — Risks of Material Misstatement (NSA 315 / 330)', `
+  <table style="width:100%;border-collapse:collapse;font-size:9.5pt;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Risk Description</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Area / Assertions</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">Flags</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">IR</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">CR</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">ROMM</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Planned Response</th>
+    </tr></thead>
+    <tbody>
+      ${riskRegister
+        .map((r) => {
+          const romm = combinedRomm(r);
+          const flags = [r.fraudRisk ? 'Fraud' : '', r.significantRisk ? 'Significant' : ''].filter(Boolean).join(', ') || '—';
+          return `<tr>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${r.description ?? ''}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;"><strong>${r.area ?? ''}</strong><br/><span style="color:#64748b;font-size:8.5pt;">${r.assertions ?? ''}</span></td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;color:${flags === '—' ? '#94a3b8' : '#dc2626'};">${flags}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">${r.inherent ?? ''}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">${r.control ?? ''}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;font-weight:bold;color:${riskColor(romm)};">${romm}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${r.response ?? ''}</td>
+          </tr>`;
+        })
+        .join('')}
+    </tbody>
+  </table>`)
+    : ''
+}
+
+${
+  analyticalRows.length > 0
+    ? sub(`2.6 Comparative Analytical Review (NSA 520) — variances over ${analyticalThreshold}% flagged`, `
+  <table style="width:100%;border-collapse:collapse;font-size:9.5pt;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">FS Caption</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Current Year</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Prior Year</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Variance</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Var %</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Commentary</th>
+    </tr></thead>
+    <tbody>
+      ${analyticalRows
+        .map((row) => {
+          const cy = Number(row.current) || 0;
+          const py = Number(row.prior) || 0;
+          const variance = cy - py;
+          const pct = py ? (variance / Math.abs(py)) * 100 : cy ? 100 : 0;
+          const flagged = Math.abs(pct) >= analyticalThreshold && (cy !== 0 || py !== 0);
+          return `<tr style="${flagged ? 'background:#fffbeb;' : ''}">
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${flagged ? '&#9888; ' : ''}${row.caption ?? ''}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(cy)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(py)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(variance)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;font-weight:bold;color:${flagged ? '#d97706' : '#64748b'};">${pct.toFixed(1)}%</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${row.commentary ?? ''}</td>
+          </tr>`;
+        })
+        .join('')}
+    </tbody>
+  </table>`)
+    : ''
+}
+
 <!-- SECTION 3 -->
 ${sec('Section 3: Materiality & Sampling', 'NSA 320, 530')}
 
@@ -197,6 +284,44 @@ ${
         .join('')}
     </tbody>
   </table>`)
+    : ''
+}
+
+${
+  misstatements.length > 0
+    ? sub('3.3 Evaluation of Misstatements (NSA 450)', `
+  <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin-bottom:10px;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Description</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Account</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Type</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">Amount</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;">Status</th>
+    </tr></thead>
+    <tbody>
+      ${misstatements
+        .map(
+          (m) =>
+            `<tr><td style="padding:7px 10px;border:1px solid #e2e8f0;">${m.description ?? ''}</td><td style="padding:7px 10px;border:1px solid #e2e8f0;">${m.account ?? ''}</td><td style="padding:7px 10px;border:1px solid #e2e8f0;">${m.type ?? ''}</td><td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:right;">${currency(Number(m.amount) || 0)}</td><td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;color:${m.status === 'Corrected' ? '#16a34a' : '#d97706'};font-weight:bold;">${m.status ?? 'Uncorrected'}</td></tr>`
+        )
+        .join('')}
+    </tbody>
+  </table>
+  ${field('Aggregate Uncorrected Misstatements (Gross)', currency(grossUncorrected))}
+  ${field('Aggregate Uncorrected Misstatements (Net)', currency(netUncorrected))}
+  <div style="margin-top:8px;padding:10px 14px;border-radius:5px;background:${
+    om > 0 && grossUncorrected > om ? '#fef2f2' : om > 0 && grossUncorrected > pm ? '#fffbeb' : '#f0fdf4'
+  };border-left:3px solid ${om > 0 && grossUncorrected > om ? '#dc2626' : om > 0 && grossUncorrected > pm ? '#d97706' : '#16a34a'};font-size:10pt;">
+    <strong>Conclusion:</strong> ${
+      om <= 0
+        ? 'Materiality not yet determined — evaluation pending.'
+        : grossUncorrected > om
+        ? 'Aggregate uncorrected misstatements EXCEED overall materiality. The financial statements may be materially misstated; the impact on the audit opinion must be considered (NSA 705).'
+        : grossUncorrected > pm
+        ? 'Aggregate uncorrected misstatements exceed performance materiality but remain below overall materiality. The adequacy of the remaining buffer and audit strategy was reassessed.'
+        : 'Aggregate uncorrected misstatements are below performance materiality. The financial statements are not materially misstated by identified errors, individually or in aggregate.'
+    }
+  </div>`)
     : ''
 }
 
@@ -260,9 +385,9 @@ ${
 ${sub('4.4 NSA 510 — Opening Balances', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     ${checklistRows(ev?.sa510?.checklist ?? {}, {
-      priorPeriod: 'Prior period closing balances verified',
-      policies: 'Consistent accounting policies confirmed',
-      predecessor: 'Predecessor working papers reviewed',
+      agreePriorPeriod: 'Prior period closing balances verified',
+      consistentPolicies: 'Consistent accounting policies confirmed',
+      reviewedPredecessorWP: 'Predecessor working papers reviewed',
     })}
   </table>
   ${ev?.sa510?.notes ? field('Notes', ev.sa510.notes) : ''}
@@ -292,9 +417,9 @@ ${
 ${sub('4.6 NSA 560 — Subsequent Events', `
   <table style="width:100%;border-collapse:collapse;font-size:10pt;">
     ${checklistRows(ev?.sa560?.checklist ?? {}, {
-      managementInquiry: 'Management inquiry on subsequent events',
-      minutesReview: 'Board/management meeting minutes reviewed',
-      interimFS: 'Interim financial statements reviewed',
+      inquiryManagement: 'Management inquiry on subsequent events',
+      reviewMinutes: 'Board/management meeting minutes reviewed',
+      reviewInterimFS: 'Interim financial statements reviewed',
     })}
   </table>
   ${ev?.sa560?.eventsNoted ? field('Events Noted', ev.sa560.eventsNoted) : ''}
@@ -306,7 +431,7 @@ ${sub('4.7 NSA 570 — Going Concern', `
     ${checklistRows(ev?.sa570?.indicators ?? {}, {
       netLiability: 'Net liability position',
       borrowingMaturity: 'Borrowings approaching maturity',
-      keyManagementLoss: 'Loss of key management personnel',
+      lossKeyManagement: 'Loss of key management personnel',
       negativeCashFlow: 'Negative operating cash flows',
     })}
   </table>
@@ -318,9 +443,9 @@ ${sub('4.8 NSA 580 — Written Representations', `
   ${field('Representation Letter Date', fmt(ev?.sa580?.letterDate))}
   <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-top:8px;">
     ${checklistRows(ev?.sa580?.checklist ?? {}, {
-      fsPrepared: 'Financial statements preparation confirmed',
-      informationProvided: 'All relevant information provided',
-      transactionsRecorded: 'All transactions recorded',
+      respPreparation: 'Financial statements preparation confirmed',
+      respInformation: 'All relevant information provided',
+      respTransactions: 'All transactions recorded',
     })}
   </table>
 `)}
@@ -333,7 +458,7 @@ ${sub('5.1 NSA 260 — Communication with TCWG', `
     ${(comm?.sa260 ?? [])
       .map(
         (item: any, i: number) =>
-          `<tr style="background:${i % 2 === 0 ? '#f8fafc' : 'white'};"><td style="padding:6px 10px;border:1px solid #e2e8f0;width:80px;text-align:center;color:${item.checked ? '#16a34a' : '#94a3b8'};">${checked(item.checked)}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${item.label ?? ''}</td></tr>`
+          `<tr style="background:${i % 2 === 0 ? '#f8fafc' : 'white'};"><td style="padding:6px 10px;border:1px solid #e2e8f0;width:80px;text-align:center;color:${item.checked ? '#16a34a' : '#94a3b8'};">${checked(item.checked)}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${item.text ?? item.label ?? ''}</td></tr>`
       )
       .join('')}
   </table>
@@ -344,7 +469,7 @@ ${sub('5.2 NSA 265 — Internal Control Deficiencies', `
     ${(comm?.sa265 ?? [])
       .map(
         (item: any, i: number) =>
-          `<tr style="background:${i % 2 === 0 ? '#f8fafc' : 'white'};"><td style="padding:6px 10px;border:1px solid #e2e8f0;width:80px;text-align:center;color:${item.checked ? '#16a34a' : '#94a3b8'};">${checked(item.checked)}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${item.label ?? ''}</td></tr>`
+          `<tr style="background:${i % 2 === 0 ? '#f8fafc' : 'white'};"><td style="padding:6px 10px;border:1px solid #e2e8f0;width:80px;text-align:center;color:${item.checked ? '#16a34a' : '#94a3b8'};">${checked(item.checked)}</td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${item.text ?? item.label ?? ''}</td></tr>`
       )
       .join('')}
   </table>
@@ -399,6 +524,43 @@ ${sub('7.1 Document Register', `
 `)}`
     : ''
 }
+
+<!-- SECTION 8: SIGN-OFF REGISTER -->
+${sec('Section 8: Documentation Sign-off Register', 'NSA 230')}
+${sub('8.1 Preparation & Review Sign-offs', `
+  <table style="width:100%;border-collapse:collapse;font-size:10pt;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Section</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Prepared By</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Date</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Reviewed By</th>
+      <th style="padding:7px 10px;border:1px solid #e2e8f0;text-align:left;">Date</th>
+    </tr></thead>
+    <tbody>
+      ${[
+        ['basics', 'Basics & Engagement Setup'],
+        ['romm', 'Planning and Risk Assessment'],
+        ['materiality', 'Materiality & Sampling'],
+        ['auditEvidence', 'Audit Evidence'],
+        ['communication', 'Communication'],
+        ['reporting', 'Reporting & Conclusion'],
+        ['workingPapers', 'Working Papers'],
+      ]
+        .map(([id, label]) => {
+          const so = signoffs[id] ?? {};
+          const cell = (v?: string) => v || '<span style="color:#94a3b8;font-style:italic;">Pending</span>';
+          return `<tr>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;font-weight:bold;">${label}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${cell(so.preparedBy)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${so.preparedAt ? new Date(so.preparedAt).toLocaleDateString() : '—'}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${cell(so.reviewedBy)}</td>
+            <td style="padding:7px 10px;border:1px solid #e2e8f0;">${so.reviewedAt ? new Date(so.reviewedAt).toLocaleDateString() : '—'}</td>
+          </tr>`;
+        })
+        .join('')}
+    </tbody>
+  </table>
+`)}
 
 <!-- FOOTER -->
 <div style="margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:center;color:#94a3b8;font-size:9pt;">

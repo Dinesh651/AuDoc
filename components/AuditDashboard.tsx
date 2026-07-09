@@ -1,6 +1,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { Client, AuditTabInfo, AuditReportDetails, TeamMember } from '../types';
+import { Client, AuditTabInfo, AuditReportDetails, TeamMember, SectionSignOff } from '../types';
+import SignOffBar from './SignOffBar';
 import ReportingAndConclusion from './ReportingAndConclusion';
 import { generateAuditReport } from '../services/auditReportService';
 import { generateFullEngagementReport } from '../services/fullEngagementReportService';
@@ -51,6 +52,7 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [signOffs, setSignOffs] = useState<Record<string, SectionSignOff>>({});
 
   // Engagement closed state
   const [isClosed, setIsClosed] = useState(false);
@@ -73,6 +75,14 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'basics/teamMembers', (data) => {
       if (data) setTeamMembers(data);
+    });
+    return () => unsubscribe();
+  }, [engagementId]);
+
+  // Sync section sign-offs (NSA 230) for progress tracking
+  useEffect(() => {
+    const unsubscribe = subscribeToSection(engagementId, 'signoffs', (data) => {
+      setSignOffs(data || {});
     });
     return () => unsubscribe();
   }, [engagementId]);
@@ -140,6 +150,16 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
 
   const ActiveTabComponent = auditTabs.find((tab) => tab.id === activeTabId)?.component;
 
+  // Engagement progress based on section sign-offs (reviewed = complete, prepared = half)
+  const progress = auditTabs.reduce((acc, tab) => {
+    const so = signOffs[tab.id];
+    if (so?.reviewedBy) return acc + 1;
+    if (so?.preparedBy) return acc + 0.5;
+    return acc;
+  }, 0);
+  const progressPercent = Math.round((progress / auditTabs.length) * 100);
+  const reviewedCount = auditTabs.filter((tab) => signOffs[tab.id]?.reviewedBy).length;
+
   return (
     <div className="flex min-h-screen bg-slate-100">
       <Sidebar
@@ -147,6 +167,7 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
         activeTabId={activeTabId}
         setActiveTabId={setActiveTabId}
         isSidebarOpen={isSidebarOpen}
+        signOffs={signOffs}
       />
 
       {isSidebarOpen && (
@@ -182,6 +203,15 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
                 In Progress
               </span>
             )}
+            <div className="hidden sm:flex items-center gap-2 ml-2" title={`${reviewedCount} of ${auditTabs.length} sections reviewed`}>
+              <div className="w-32 h-2 bg-slate-200 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${progressPercent >= 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <span className="text-xs font-semibold text-slate-500">{progressPercent}% signed off</span>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -250,6 +280,12 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({ client, engagementId, o
               isClosed={isClosed}
             />
           )}
+          <SignOffBar
+            engagementId={engagementId}
+            sectionId={activeTabId}
+            signOff={signOffs[activeTabId]}
+            isClosed={isClosed}
+          />
         </div>
       </main>
     </div>

@@ -69,6 +69,50 @@ const TextAreaWithAutoFill: React.FC<TextAreaWithAutoFillProps> = ({
   );
 };
 
+type RiskLevel = 'Low' | 'Moderate' | 'High';
+
+interface RiskItem {
+  id: string;
+  description: string;
+  area: string;
+  assertions: string;
+  fraudRisk: boolean;
+  significantRisk: boolean;
+  inherent: RiskLevel;
+  control: RiskLevel;
+  response: string;
+}
+
+interface AnalyticalRow {
+  id: string;
+  caption: string;
+  current: number;
+  prior: number;
+  commentary: string;
+}
+
+const RISK_SCORE: Record<RiskLevel, number> = { Low: 1, Moderate: 2, High: 3 };
+
+const combinedRomm = (risk: RiskItem): RiskLevel => {
+  if (risk.fraudRisk || risk.significantRisk) return 'High';
+  const product = RISK_SCORE[risk.inherent] * RISK_SCORE[risk.control];
+  if (product >= 6) return 'High';
+  if (product >= 3) return 'Moderate';
+  return 'Low';
+};
+
+const RiskBadge: React.FC<{ level: RiskLevel }> = ({ level }) => (
+  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${
+    level === 'High' ? 'bg-red-100 text-red-700' :
+    level === 'Moderate' ? 'bg-amber-100 text-amber-700' :
+    'bg-green-100 text-green-700'
+  }`}>
+    {level}
+  </span>
+);
+
+const npr = (n: number) => `NPR ${(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
 const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagementId }) => {
   const [data, setData] = useState({
     overallStrategy: '',
@@ -77,6 +121,9 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
     analyticalProcedures: '',
     observationInspection: '',
     internalControl: '',
+    riskRegister: [] as RiskItem[],
+    analyticalThreshold: 10,
+    analyticalRows: [] as AnalyticalRow[],
   });
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -84,14 +131,19 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
   useEffect(() => {
     const unsubscribe = subscribeToSection(engagementId, 'planning', (fetchedData) => {
         if (fetchedData) {
-            setData(prev => ({ ...prev, ...fetchedData }));
+            setData(prev => ({
+                ...prev,
+                ...fetchedData,
+                riskRegister: fetchedData.riskRegister || [],
+                analyticalRows: fetchedData.analyticalRows || [],
+            }));
         }
         setIsLoaded(true);
     });
     return () => unsubscribe();
   }, [engagementId]);
 
-  const updateData = (key: keyof typeof data, value: string) => {
+  const updateData = (key: keyof typeof data, value: any) => {
       setData(prev => {
           const newState = { ...prev, [key]: value };
           if (isLoaded) {
@@ -99,6 +151,45 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
           }
           return newState;
       });
+  };
+
+  // --- Risk Register (NSA 315 / 330) ---
+  const emptyRisk: Omit<RiskItem, 'id'> = {
+    description: '', area: '', assertions: '', fraudRisk: false,
+    significantRisk: false, inherent: 'Moderate', control: 'Moderate', response: '',
+  };
+  const [newRisk, setNewRisk] = useState<Omit<RiskItem, 'id'>>(emptyRisk);
+
+  const addRisk = () => {
+    if (!newRisk.description.trim() || !newRisk.area.trim()) return;
+    updateData('riskRegister', [...data.riskRegister, { ...newRisk, id: Date.now().toString() }]);
+    setNewRisk(emptyRisk);
+  };
+
+  const removeRisk = (id: string) => {
+    updateData('riskRegister', data.riskRegister.filter(r => r.id !== id));
+  };
+
+  const updateRiskResponse = (id: string, response: string) => {
+    updateData('riskRegister', data.riskRegister.map(r => r.id === id ? { ...r, response } : r));
+  };
+
+  // --- Comparative Analytical Review (NSA 520) ---
+  const emptyAnalytical: Omit<AnalyticalRow, 'id'> = { caption: '', current: 0, prior: 0, commentary: '' };
+  const [newAnalytical, setNewAnalytical] = useState<Omit<AnalyticalRow, 'id'>>(emptyAnalytical);
+
+  const addAnalyticalRow = () => {
+    if (!newAnalytical.caption.trim()) return;
+    updateData('analyticalRows', [...data.analyticalRows, { ...newAnalytical, id: Date.now().toString() }]);
+    setNewAnalytical(emptyAnalytical);
+  };
+
+  const removeAnalyticalRow = (id: string) => {
+    updateData('analyticalRows', data.analyticalRows.filter(r => r.id !== id));
+  };
+
+  const updateAnalyticalCommentary = (id: string, commentary: string) => {
+    updateData('analyticalRows', data.analyticalRows.map(r => r.id === id ? { ...r, commentary } : r));
   };
 
   // Auto-fill contents
@@ -285,6 +376,264 @@ const PlanningAndRiskAssessment: React.FC<AuditTabProps> = ({ client, engagement
             />
           </div>
         </div>
+      </div>
+
+      {/* Section C: Risk Register (NSA 315 / 330) */}
+      <div className="bg-white p-8 rounded-lg shadow-sm">
+        <div className="mb-6 border-b pb-4">
+          <h3 className="text-xl font-bold text-slate-800">C. Risk Register — Risks of Material Misstatement (NSA 315 / NSA 330)</h3>
+          <p className="text-slate-500 mt-1">
+            Document each identified risk at the assertion level, assess inherent and control risk, and design the planned audit response. Fraud risks and significant risks are automatically rated High.
+          </p>
+        </div>
+
+        {/* Add risk form */}
+        <div className="bg-slate-50 p-5 rounded-md border border-slate-200 mb-6 space-y-3">
+          <h4 className="text-sm font-bold text-slate-700 uppercase">Identify New Risk</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input
+              type="text"
+              placeholder="Risk description (e.g., Revenue may be overstated near year-end)"
+              className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+              value={newRisk.description}
+              onChange={(e) => setNewRisk({ ...newRisk, description: e.target.value })}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder="FS Area (e.g., Revenue)"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newRisk.area}
+                onChange={(e) => setNewRisk({ ...newRisk, area: e.target.value })}
+              />
+              <input
+                type="text"
+                placeholder="Assertions (e.g., Occurrence, Cut-off)"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newRisk.assertions}
+                onChange={(e) => setNewRisk({ ...newRisk, assertions: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-slate-600 font-medium">Inherent Risk:</label>
+              <select
+                value={newRisk.inherent}
+                onChange={(e) => setNewRisk({ ...newRisk, inherent: e.target.value as RiskLevel })}
+                className="p-2 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+              >
+                <option>Low</option><option>Moderate</option><option>High</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-slate-600 font-medium">Control Risk:</label>
+              <select
+                value={newRisk.control}
+                onChange={(e) => setNewRisk({ ...newRisk, control: e.target.value as RiskLevel })}
+                className="p-2 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+              >
+                <option>Low</option><option>Moderate</option><option>High</option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={newRisk.fraudRisk} onChange={(e) => setNewRisk({ ...newRisk, fraudRisk: e.target.checked })} className="h-4 w-4 text-red-600 border-slate-300 rounded focus:ring-red-500" />
+              Fraud Risk (NSA 240)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={newRisk.significantRisk} onChange={(e) => setNewRisk({ ...newRisk, significantRisk: e.target.checked })} className="h-4 w-4 text-amber-600 border-slate-300 rounded focus:ring-amber-500" />
+              Significant Risk
+            </label>
+            <span className="text-sm text-slate-500">Combined ROMM: <RiskBadge level={combinedRomm({ ...newRisk, id: '' })} /></span>
+            <button
+              onClick={addRisk}
+              disabled={!newRisk.description.trim() || !newRisk.area.trim()}
+              className="ml-auto px-5 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Add Risk
+            </button>
+          </div>
+        </div>
+
+        {/* Risk table */}
+        {data.riskRegister.length > 0 ? (
+          <div className="overflow-x-auto border rounded-md">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Risk Description</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Area / Assertions</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">Flags</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">IR</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">CR</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">ROMM</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider min-w-[220px]">Planned Response (NSA 330)</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-slate-200">
+                {data.riskRegister.map((risk) => (
+                  <tr key={risk.id} className="hover:bg-slate-50 align-top">
+                    <td className="px-4 py-3 text-sm text-slate-800 max-w-xs">{risk.description}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <p className="font-semibold text-slate-700">{risk.area}</p>
+                      <p className="text-xs text-slate-500">{risk.assertions}</p>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        {risk.fraudRisk && <span className="px-2 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded-full uppercase">Fraud</span>}
+                        {risk.significantRisk && <span className="px-2 py-0.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-full uppercase">Significant</span>}
+                        {!risk.fraudRisk && !risk.significantRisk && <span className="text-slate-300 text-xs">—</span>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-center"><RiskBadge level={risk.inherent} /></td>
+                    <td className="px-4 py-3 text-center"><RiskBadge level={risk.control} /></td>
+                    <td className="px-4 py-3 text-center"><RiskBadge level={combinedRomm(risk)} /></td>
+                    <td className="px-4 py-3">
+                      <textarea
+                        rows={2}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                        placeholder="e.g., Extended cut-off testing, external confirmations..."
+                        value={risk.response}
+                        onChange={(e) => updateRiskResponse(risk.id, e.target.value)}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => removeRisk(risk.id)} className="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 bg-slate-50 rounded-md border border-dashed border-slate-300">
+            <p className="text-slate-500">No risks identified yet.</p>
+            <p className="text-xs text-slate-400 mt-1">Every audit should document at least the presumed risks: revenue recognition fraud risk (NSA 240) and management override of controls.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Section D: Comparative Analytical Review (NSA 520) */}
+      <div className="bg-white p-8 rounded-lg shadow-sm">
+        <div className="mb-6 border-b pb-4 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-bold text-slate-800">D. Comparative Analytical Review (NSA 520)</h3>
+            <p className="text-slate-500 mt-1">
+              Compare current year balances with the prior year. Variances beyond the threshold are flagged for investigation and commentary.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <label className="text-sm font-medium text-slate-600">Flag variances over</label>
+            <input
+              type="number"
+              value={data.analyticalThreshold}
+              onChange={(e) => updateData('analyticalThreshold', parseFloat(e.target.value) || 0)}
+              className="w-20 p-2 bg-slate-50 border border-slate-300 rounded-md text-sm text-center focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-sm font-medium text-slate-600">%</span>
+          </div>
+        </div>
+
+        {/* Add row form */}
+        <div className="bg-slate-50 p-4 rounded-md border border-slate-200 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-4">
+              <input
+                type="text"
+                placeholder="FS Caption (e.g., Revenue, Trade Receivables)"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newAnalytical.caption}
+                onChange={(e) => setNewAnalytical({ ...newAnalytical, caption: e.target.value })}
+              />
+            </div>
+            <div className="md:col-span-3">
+              <label className="text-xs text-slate-400 block mb-1">Current Year</label>
+              <input
+                type="number"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newAnalytical.current || ''}
+                onChange={(e) => setNewAnalytical({ ...newAnalytical, current: parseFloat(e.target.value) || 0 })}
+              />
+            </div>
+            <div className="md:col-span-3">
+              <label className="text-xs text-slate-400 block mb-1">Prior Year (Audited)</label>
+              <input
+                type="number"
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500"
+                value={newAnalytical.prior || ''}
+                onChange={(e) => setNewAnalytical({ ...newAnalytical, prior: parseFloat(e.target.value) || 0 })}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <button
+                onClick={addAnalyticalRow}
+                disabled={!newAnalytical.caption.trim()}
+                className="w-full px-4 py-2.5 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Add Line
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {data.analyticalRows.length > 0 ? (
+          <div className="overflow-x-auto border rounded-md">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">FS Caption</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Current Year</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Prior Year</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Variance</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Var %</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider min-w-[220px]">Explanation / Commentary</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-slate-200">
+                {data.analyticalRows.map((row) => {
+                  const variance = (row.current || 0) - (row.prior || 0);
+                  const variancePct = row.prior ? (variance / Math.abs(row.prior)) * 100 : (row.current ? 100 : 0);
+                  const flagged = Math.abs(variancePct) >= (data.analyticalThreshold || 0) && (row.current !== 0 || row.prior !== 0);
+                  return (
+                    <tr key={row.id} className={`align-top ${flagged ? 'bg-amber-50/60 hover:bg-amber-50' : 'hover:bg-slate-50'}`}>
+                      <td className="px-4 py-3 text-sm font-medium text-slate-800">
+                        {flagged && (
+                          <span title="Variance exceeds threshold — investigate" className="inline-block mr-1.5 align-middle">
+                            <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                          </span>
+                        )}
+                        {row.caption}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-slate-600">{npr(row.current)}</td>
+                      <td className="px-4 py-3 text-sm text-right text-slate-600">{npr(row.prior)}</td>
+                      <td className={`px-4 py-3 text-sm text-right font-semibold ${variance < 0 ? 'text-red-600' : 'text-slate-700'}`}>{npr(variance)}</td>
+                      <td className={`px-4 py-3 text-sm text-right font-bold ${flagged ? 'text-amber-600' : 'text-slate-500'}`}>{variancePct.toFixed(1)}%</td>
+                      <td className="px-4 py-3">
+                        <textarea
+                          rows={2}
+                          className={`w-full p-2 border rounded text-xs focus:ring-2 focus:ring-indigo-500 focus:bg-white ${flagged && !row.commentary.trim() ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}
+                          placeholder={flagged ? 'Required: explain this significant variance...' : 'Optional commentary...'}
+                          value={row.commentary}
+                          onChange={(e) => updateAnalyticalCommentary(row.id, e.target.value)}
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => removeAnalyticalRow(row.id)} className="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 bg-slate-50 rounded-md border border-dashed border-slate-300">
+            <p className="text-slate-500">No comparative lines added yet.</p>
+            <p className="text-xs text-slate-400 mt-1">Add key financial statement captions to compare against prior year audited figures.</p>
+          </div>
+        )}
       </div>
     </div>
   );

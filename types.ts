@@ -31,6 +31,13 @@ export interface TeamMember {
   invitedAt?: string;
 }
 
+export interface SectionSignOff {
+  preparedBy?: string;
+  preparedAt?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
 export interface WorkingPaper {
   id: string;
   category: 'prev_year_financials' | 'current_year_financials' | 'other';
