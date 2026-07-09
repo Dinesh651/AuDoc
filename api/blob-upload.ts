@@ -23,6 +23,16 @@ const ALLOWED_CONTENT_TYPES = [
 // Public Firebase web API key (same one shipped to browsers in firebase.ts).
 const FIREBASE_API_KEY = 'AIzaSyAorD9R4FiSq6M1MeJwFukkO3Leu7q6F7o';
 
+// Finds the Blob read-write token even when the store was connected with a
+// custom environment-variable prefix (e.g. AUDOCFILES_READ_WRITE_TOKEN).
+function resolveBlobToken(): string | undefined {
+  if (process.env.BLOB_READ_WRITE_TOKEN) return process.env.BLOB_READ_WRITE_TOKEN;
+  const key = Object.keys(process.env).find(
+    (k) => k.endsWith('_READ_WRITE_TOKEN') && process.env[k]?.startsWith('vercel_blob')
+  );
+  return key ? process.env[key] : undefined;
+}
+
 // Verifies a Firebase Authentication ID token via the Identity Toolkit REST
 // API — inlined here because Vercel's ESM function runtime does not resolve
 // extensionless relative imports.
@@ -47,9 +57,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  const blobToken = resolveBlobToken();
+  if (!blobToken) {
     return res.status(500).json({
-      error: 'Blob storage is not configured. Connect a Vercel Blob store to this project (see STORAGE.md).',
+      error: 'Blob store not connected to this project. In Vercel: Storage -> your Blob store -> "Connect Project" -> select au-doc (Production + Preview), then redeploy. See STORAGE.md.',
     });
   }
 
@@ -59,6 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const jsonResponse = await handleUpload({
       body,
       request: req,
+      token: blobToken,
       onBeforeGenerateToken: async (pathname, clientPayload) => {
         const payload = clientPayload ? JSON.parse(clientPayload) : {};
         const user = await verifyFirebaseToken(payload.idToken);
