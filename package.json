@@ -9,12 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vercel/blob": "^2.6.1",
+    "firebase": "^12.6.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "firebase": "^12.6.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@vercel/node": "^5.8.22",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

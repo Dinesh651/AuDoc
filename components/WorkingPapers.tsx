@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from '../firebase';
+import { upload } from '@vercel/blob/client';
+import { ref as storageRef, deleteObject } from 'firebase/storage';
+import { storage, auth } from '../firebase';
 import { AuditTabProps, WorkingPaper } from '../types';
 import { subscribeToWorkingPapers, addWorkingPaperMeta, deleteWorkingPaperMeta } from '../services/db';
 
@@ -255,45 +256,64 @@ const WorkingPapers: React.FC<AuditTabProps> = ({ client, engagementId, isClosed
     setUploadError('');
 
     try {
-      const paperId = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-      const fileRef = storageRef(storage, `engagements/${engagementId}/workingPapers/${paperId}/${file.name}`);
-      const task = uploadBytesResumable(fileRef, file);
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('You must be signed in to upload files.');
 
-      task.on(
-        'state_changed',
-        (snap) => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
-        (err) => {
-          setUploadError(`Upload failed. Check Firebase Storage rules are configured. (${err.message})`);
-          setUploadingCat(null);
-        },
-        async () => {
-          const url = await getDownloadURL(task.snapshot.ref);
-          const paper: WorkingPaper = {
-            id: paperId,
-            category,
-            name: file.name.replace(/\.[^/.]+$/, ''),
-            fileName: file.name,
-            fileUrl: url,
-            fileType: file.type || 'application/octet-stream',
-            fileSize: file.size,
-            uploadedAt: new Date().toISOString(),
-          };
-          await addWorkingPaperMeta(engagementId, paper);
-          setUploadingCat(null);
-          setUploadProgress(0);
+      const paperId = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const blob = await upload(
+        `engagements/${engagementId}/workingPapers/${paperId}/${file.name}`,
+        file,
+        {
+          access: 'public',
+          handleUploadUrl: '/api/blob-upload',
+          clientPayload: JSON.stringify({ idToken }),
+          contentType: file.type || 'application/octet-stream',
+          multipart: true,
+          onUploadProgress: ({ percentage }) => setUploadProgress(Math.round(percentage)),
         }
       );
+
+      const paper: WorkingPaper = {
+        id: paperId,
+        category,
+        name: file.name.replace(/\.[^/.]+$/, ''),
+        fileName: file.name,
+        fileUrl: blob.url,
+        fileType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        uploadedAt: new Date().toISOString(),
+      };
+      await addWorkingPaperMeta(engagementId, paper);
     } catch (err: any) {
-      setUploadError(`Upload failed: ${err.message}`);
+      const msg: string = err?.message || 'Unknown error';
+      if (/not configured|No token found|BLOB_READ_WRITE_TOKEN/i.test(msg)) {
+        setUploadError('File storage is not connected yet. In the Vercel dashboard, add a Blob store to this project (see STORAGE.md in the repo), then redeploy.');
+      } else if (/Failed to fetch|NetworkError|404/i.test(msg)) {
+        setUploadError('Could not reach the upload API. On a local dev server use "vercel dev" instead of "npm run dev" — the /api routes only exist on Vercel.');
+      } else {
+        setUploadError(`Upload failed: ${msg}`);
+      }
+    } finally {
       setUploadingCat(null);
+      setUploadProgress(0);
     }
   };
 
   const handleDelete = async (paper: WorkingPaper) => {
     if (!window.confirm(`Delete "${paper.fileName}"? This cannot be undone.`)) return;
     try {
-      const fileRef = storageRef(storage, `engagements/${engagementId}/workingPapers/${paper.id}/${paper.fileName}`);
-      await deleteObject(fileRef);
+      if (/\.blob\.vercel-storage\.com\//.test(paper.fileUrl)) {
+        const idToken = await auth.currentUser?.getIdToken();
+        await fetch('/api/blob-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: paper.fileUrl, idToken }),
+        });
+      } else {
+        // Legacy file stored on Firebase Storage before the Vercel Blob migration
+        const fileRef = storageRef(storage, `engagements/${engagementId}/workingPapers/${paper.id}/${paper.fileName}`);
+        await deleteObject(fileRef);
+      }
     } catch {
       // File may already be removed from storage
     }
@@ -316,9 +336,6 @@ const WorkingPapers: React.FC<AuditTabProps> = ({ client, engagementId, isClosed
           <div className="flex-1">
             <p className="text-sm font-semibold text-red-800">Upload Error</p>
             <p className="text-sm text-red-600 mt-0.5">{uploadError}</p>
-            <p className="text-xs text-red-400 mt-1">
-              In Firebase Console &rarr; Storage &rarr; Rules, add: <code>allow read, write: if request.auth != null;</code>
-            </p>
           </div>
           <button onClick={() => setUploadError('')} className="text-red-400 hover:text-red-600">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>

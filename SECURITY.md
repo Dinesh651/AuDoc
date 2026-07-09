@@ -23,7 +23,9 @@ Known tradeoff: the `invitations` node is writable by any signed-in user, becaus
 
 ## 2. Storage rules
 
-Copy the contents of [`storage.rules`](storage.rules) into:
+> **Note:** new working paper uploads now use **Vercel Blob**, not Firebase Storage (the Spark-plan bucket ran out of quota) — see [STORAGE.md](STORAGE.md). Firebase Storage only serves files uploaded before that migration.
+
+If legacy files remain in the Firebase bucket, copy the contents of [`storage.rules`](storage.rules) into:
 
 > Firebase Console → Storage → **Rules** → paste → Publish
 
